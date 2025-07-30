@@ -1,0 +1,9 @@
+[package]
+name = "acadia"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+winit = "0.30.12"
+ash = "0.38.0"
+ash-window = "0.13.0"
