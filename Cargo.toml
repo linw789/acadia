@@ -5,5 +5,9 @@ edition = "2024"
 
 [dependencies]
 winit = "0.30.12"
-ash = "0.38.0"
+ash = { version = "0.38.0", default-features = false, features = [
+    "linked",
+    "debug",
+    "std",
+] }
 ash-window = "0.13.0"
