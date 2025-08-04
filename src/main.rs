@@ -128,7 +128,7 @@ impl VkBase {
             extension_names.push(debug_utils::NAME.as_ptr());
 
             let appinfo = vk::ApplicationInfo::default()
-                .application_name(c"Acadia Vulkan Renderer")
+                .application_name(c"Acadia")
                 .application_version(0)
                 .engine_name(c"Acadia Vulkan Renderer")
                 .engine_version(0)
@@ -1136,7 +1136,7 @@ impl ApplicationHandler for App {
                             self.window_width,
                             self.window_height,
                         ))
-                        .with_title("Acadia Vulkan Renderer"),
+                        .with_title("Acadia"),
                 )
                 .unwrap(),
         );
