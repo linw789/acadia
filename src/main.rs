@@ -87,31 +87,33 @@ struct VkBase {
     pub surface_loader: surface::Instance,
     pub swapchain_loader: swapchain::Device,
 
-    pub device_memory_properties: vk::PhysicalDeviceMemoryProperties,
-    pub queue_family_index: u32,
+    device_memory_properties: vk::PhysicalDeviceMemoryProperties,
+    queue_family_index: u32,
     pub present_queue: vk::Queue,
 
-    pub surface: vk::SurfaceKHR,
-    pub surface_format: vk::SurfaceFormatKHR,
+    surface: vk::SurfaceKHR,
+    surface_format: vk::SurfaceFormatKHR,
     pub surface_resolution: vk::Extent2D,
 
     pub swapchain: vk::SwapchainKHR,
-    pub present_images: Vec<vk::Image>,
-    pub present_image_views: Vec<vk::ImageView>,
+    present_images: Vec<vk::Image>,
+    present_image_views: Vec<vk::ImageView>,
 
     pub cmd_pool: vk::CommandPool,
     pub cmd_buf_draw: vk::CommandBuffer,
     pub cmd_buf_setup: vk::CommandBuffer,
 
-    pub depth_image: vk::Image,
-    pub depth_image_view: vk::ImageView,
-    pub depth_image_memory: vk::DeviceMemory,
+    depth_image: vk::Image,
+    depth_image_view: vk::ImageView,
+    depth_image_memory: vk::DeviceMemory,
 
-    pub fence_draw_cmd_reuse: vk::Fence,
     pub fence_setup_cmd_reuse: vk::Fence,
+    pub frame_fences: Vec<vk::Fence>,
 
-    pub semaphore_present_complete: vk::Semaphore,
-    pub semaphore_rendering_complete: vk::Semaphore,
+    pub present_complete_semaphores: Vec<vk::Semaphore>,
+    pub render_complete_semaphores: Vec<vk::Semaphore>,
+
+    pub max_frames_inflight: usize,
 }
 
 impl VkBase {
@@ -391,30 +393,39 @@ impl VkBase {
             (depth_image, depth_image_view, depth_image_memory)
         };
 
-        let (fence_draw_cmd_reuse, fence_setup_cmd_reuse) = unsafe {
-            let fence_create_info =
-                vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-            (
-                device
-                    .create_fence(&fence_create_info, None)
-                    .expect("Failed to create fence."),
-                device
-                    .create_fence(&fence_create_info, None)
-                    .expect("Failed to create fence."),
-            )
+        let fence_setup_cmd_reuse = unsafe {
+            let create_info = vk::FenceCreateInfo::default();
+            device
+                .create_fence(&create_info, None)
+                .expect("Failed to create fence.")
         };
 
-        let (semaphore_present_complete, semaphore_rendering_complete) = unsafe {
-            let semaphore_create_info = vk::SemaphoreCreateInfo::default();
-            (
+        let max_frames_inflight = 1; // present_image_views.len();
+
+        let mut frame_fences = Vec::with_capacity(max_frames_inflight);
+        for _ in 0..max_frames_inflight {
+            let create_info = vk::FenceCreateInfo::default();
+            let fence = unsafe {
                 device
-                    .create_semaphore(&semaphore_create_info, None)
-                    .unwrap(),
-                device
-                    .create_semaphore(&semaphore_create_info, None)
-                    .unwrap(),
-            )
-        };
+                    .create_fence(&create_info, None)
+                    .expect("Failed to create fence.")
+            };
+            frame_fences.push(fence);
+        }
+
+        let mut present_complete_semaphores = Vec::with_capacity(max_frames_inflight);
+        let mut render_complete_semaphores = Vec::with_capacity(max_frames_inflight);
+        for _ in 0..max_frames_inflight {
+            let createinfo = vk::SemaphoreCreateInfo::default();
+            let (present_sema, render_sema) = unsafe {
+                (
+                    device.create_semaphore(&createinfo, None).unwrap(),
+                    device.create_semaphore(&createinfo, None).unwrap(),
+                )
+            };
+            present_complete_semaphores.push(present_sema);
+            render_complete_semaphores.push(render_sema);
+        }
 
         Ok(Self {
             inst,
@@ -445,18 +456,20 @@ impl VkBase {
             depth_image_view,
             depth_image_memory,
 
-            fence_draw_cmd_reuse,
             fence_setup_cmd_reuse,
+            frame_fences,
 
-            semaphore_present_complete,
-            semaphore_rendering_complete,
+            present_complete_semaphores,
+            render_complete_semaphores,
+
+            max_frames_inflight,
         })
     }
 
     pub fn record_submit_cmd_buf<F: FnOnce(&Device, vk::CommandBuffer)>(
         &self,
         cmd_buf: vk::CommandBuffer,
-        fence_cmd_buf_reuse: vk::Fence,
+        frame_fence: vk::Fence,
         submit_queue: vk::Queue,
         wait_mask: &[vk::PipelineStageFlags],
         wait_semaphores: &[vk::Semaphore],
@@ -464,14 +477,6 @@ impl VkBase {
         record_cmd_buf_f: F,
     ) {
         unsafe {
-            self.device
-                .wait_for_fences(&[fence_cmd_buf_reuse], true, u64::MAX)
-                .expect("Failed to wait for command-buffer-reuse fence.");
-
-            self.device
-                .reset_fences(&[fence_cmd_buf_reuse])
-                .expect("Failed to reset command-buffer-reuse fence.");
-
             self.device
                 .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::RELEASE_RESOURCES)
                 .expect("Failed to reset command buffer.");
@@ -496,7 +501,7 @@ impl VkBase {
                 .signal_semaphores(signal_semaphores);
 
             self.device
-                .queue_submit(submit_queue, &[submit_info], fence_cmd_buf_reuse)
+                .queue_submit(submit_queue, &[submit_info], frame_fence)
                 .expect("Failed to queue submit.");
         }
     }
@@ -534,8 +539,8 @@ impl VkBase {
                         &[],
                         &[],
                         &[layout_transition_barriers],
-                    )
-                };
+                    );
+                }
             },
         );
     }
@@ -545,11 +550,15 @@ impl Drop for VkBase {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.device
-                .destroy_semaphore(self.semaphore_present_complete, None);
-            self.device
-                .destroy_semaphore(self.semaphore_rendering_complete, None);
-            self.device.destroy_fence(self.fence_draw_cmd_reuse, None);
+            for sema in &self.present_complete_semaphores {
+                self.device.destroy_semaphore(*sema, None);
+            }
+            for sema in &self.render_complete_semaphores {
+                self.device.destroy_semaphore(*sema, None);
+            }
+            for fence in &self.frame_fences {
+                self.device.destroy_fence(*fence, None);
+            }
             self.device.destroy_fence(self.fence_setup_cmd_reuse, None);
             self.device.free_memory(self.depth_image_memory, None);
             self.device.destroy_image_view(self.depth_image_view, None);
@@ -589,6 +598,8 @@ struct App {
     viewports: Vec<vk::Viewport>,
     scissors: Vec<vk::Rect2D>,
     graphics_pipelines: Vec<vk::Pipeline>,
+
+    frame_count: usize,
 }
 
 impl App {
@@ -1022,15 +1033,14 @@ impl App {
         }
     }
 
-    pub fn draw(&self) {
+    pub fn draw(&self, frame_count: usize) {
         let vk_base = self.vk_base.as_ref().unwrap();
 
-        unsafe {
-            vk_base
-                .device
-                .wait_for_fences(&[vk_base.fence_draw_cmd_reuse], true, u64::MAX)
-                .unwrap();
-        }
+        let inflight_frame_index = frame_count % vk_base.max_frames_inflight;
+        let present_complete_semaphore =
+            vk_base.present_complete_semaphores[inflight_frame_index as usize];
+        let render_complete_semaphore =
+            vk_base.render_complete_semaphores[inflight_frame_index as usize];
 
         let (present_index, _) = unsafe {
             vk_base
@@ -1038,7 +1048,7 @@ impl App {
                 .acquire_next_image(
                     vk_base.swapchain,
                     u64::MAX,
-                    vk_base.semaphore_present_complete,
+                    present_complete_semaphore,
                     vk::Fence::null(),
                 )
                 .unwrap()
@@ -1064,13 +1074,14 @@ impl App {
             .render_area(vk_base.surface_resolution.into())
             .clear_values(&clear_values);
 
+        let frame_fence = vk_base.frame_fences[inflight_frame_index];
         vk_base.record_submit_cmd_buf(
             vk_base.cmd_buf_draw,
-            vk_base.fence_draw_cmd_reuse,
+            vk::Fence::null(),
             vk_base.present_queue,
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            &[vk_base.semaphore_present_complete],
-            &[vk_base.semaphore_rendering_complete],
+            &[present_complete_semaphore],
+            &[render_complete_semaphore],
             |device, cmd_buf_draw| unsafe {
                 device.cmd_begin_render_pass(
                     cmd_buf_draw,
@@ -1109,7 +1120,7 @@ impl App {
             },
         );
 
-        let wait_semaphores = [vk_base.semaphore_rendering_complete];
+        let wait_semaphores = [render_complete_semaphore];
         let swapchains = [vk_base.swapchain];
         let image_indices = [present_index];
         let present_info = vk::PresentInfoKHR::default()
@@ -1123,6 +1134,25 @@ impl App {
                 .queue_present(vk_base.present_queue, &present_info)
                 .unwrap()
         };
+
+        /*
+        if frame_count >= vk_base.max_frames_inflight {
+            let wait_index = (frame_count + 1) % vk_base.max_frames_inflight;
+            let wait_fence = vk_base.frame_fences[wait_index];
+
+            unsafe {
+                vk_base
+                    .device
+                    .wait_for_fences(&[wait_fence], true, u64::MAX)
+                    .unwrap();
+                vk_base.device.reset_fences(&[wait_fence]).unwrap();
+            }
+        }
+        */
+
+        unsafe {
+            vk_base.device.device_wait_idle().unwrap();
+        }
     }
 }
 
@@ -1152,7 +1182,11 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                self.draw();
+                self.draw(self.frame_count);
+
+                assert!(self.frame_count < usize::MAX);
+                self.frame_count += 1;
+
                 self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
