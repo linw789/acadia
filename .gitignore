@@ -6,3 +6,9 @@ builds/
 # Added by cargo
 
 /target
+
+# Miscellaneous
+
+.lldbinit
+shader/*/*.spv
+
