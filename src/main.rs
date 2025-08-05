@@ -549,7 +549,6 @@ impl VkBase {
 impl Drop for VkBase {
     fn drop(&mut self) {
         unsafe {
-            self.device.device_wait_idle().unwrap();
             for sema in &self.present_complete_semaphores {
                 self.device.destroy_semaphore(*sema, None);
             }
@@ -606,6 +605,10 @@ impl App {
     fn init_vk(&mut self) {
         self.vk_base = VkBase::new(self.window.as_ref().unwrap()).ok();
         self.vk_base.as_ref().unwrap().setup();
+    }
+
+    fn destroy_vk(&mut self) {
+        self.vk_base = None;
     }
 
     pub fn size(mut self, width: u32, height: u32) -> Self {
@@ -1034,7 +1037,11 @@ impl App {
     }
 
     pub fn draw(&self, frame_count: usize) {
-        let vk_base = self.vk_base.as_ref().unwrap();
+        let vk_base = if let Some(base) = self.vk_base.as_ref() {
+            base
+        } else {
+            return;
+        };
 
         let inflight_frame_index = frame_count % vk_base.max_frames_inflight;
         let present_complete_semaphore =
@@ -1179,6 +1186,7 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => {
                 self.teardown_pipeline();
+                self.destroy_vk();
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
@@ -1186,8 +1194,6 @@ impl ApplicationHandler for App {
 
                 assert!(self.frame_count < usize::MAX);
                 self.frame_count += 1;
-
-                self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
         }
