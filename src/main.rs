@@ -1,7 +1,8 @@
+mod swapchain;
 use ::ash::{
     Device, Entry, Instance,
     ext::debug_utils,
-    khr::{surface, swapchain},
+    khr,
     util::{Align, read_spv},
     vk,
 };
@@ -12,6 +13,7 @@ use ::winit::{
     window::{Window, WindowId},
 };
 use std::{borrow::Cow, error::Error, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec};
+use swapchain::Swapchain;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 macro_rules! offset_of {
@@ -84,8 +86,7 @@ struct VkBase {
     pub device: Device,
     pub debug_util_loader: debug_utils::Instance,
     pub debug_messenger: vk::DebugUtilsMessengerEXT,
-    pub surface_loader: surface::Instance,
-    pub swapchain_loader: swapchain::Device,
+    pub surface_loader: khr::surface::Instance,
 
     device_memory_properties: vk::PhysicalDeviceMemoryProperties,
     queue_family_index: u32,
@@ -93,10 +94,9 @@ struct VkBase {
 
     surface: vk::SurfaceKHR,
     surface_format: vk::SurfaceFormatKHR,
-    pub surface_resolution: vk::Extent2D,
 
-    pub swapchain: vk::SwapchainKHR,
-    present_images: Vec<vk::Image>,
+    pub swapchain: Swapchain,
+
     present_image_views: Vec<vk::ImageView>,
 
     pub cmd_pool: vk::CommandPool,
@@ -180,7 +180,7 @@ impl VkBase {
             )
             .unwrap()
         };
-        let surface_loader = surface::Instance::new(&entry, &inst);
+        let surface_loader = khr::surface::Instance::new(&entry, &inst);
 
         let (physical_device, queue_family_index) = unsafe {
             let phy_devices = inst.enumerate_physical_devices().unwrap();
@@ -213,7 +213,7 @@ impl VkBase {
         };
 
         let device = {
-            let device_extension_names_raw = [swapchain::NAME.as_ptr()];
+            let device_extension_names_raw = [khr::swapchain::NAME.as_ptr()];
             let features = vk::PhysicalDeviceFeatures {
                 shader_clip_distance: 1,
                 ..Default::default()
@@ -239,64 +239,63 @@ impl VkBase {
                 .get_physical_device_surface_formats(physical_device, surface)
                 .unwrap()[0]
         };
-
-        let (swapchain_loader, swapchain, surface_resolution) = unsafe {
-            let surface_capabilities = surface_loader
+        let surface_capabilities = unsafe {
+            surface_loader
                 .get_physical_device_surface_capabilities(physical_device, surface)
-                .unwrap();
+                .unwrap()
+        };
 
-            let mut desired_image_count = surface_capabilities.min_image_count + 1;
-            if surface_capabilities.max_image_count > 0
-                && desired_image_count > surface_capabilities.max_image_count
-            {
-                desired_image_count = surface_capabilities.max_image_count;
-            }
-
-            let surface_resolution = match surface_capabilities.current_extent.width {
-                u32::MAX => vk::Extent2D {
-                    width: window.inner_size().width,
-                    height: window.inner_size().height,
-                },
-                _ => surface_capabilities.current_extent,
-            };
-
-            let pre_transform = if surface_capabilities
-                .supported_transforms
-                .contains(vk::SurfaceTransformFlagsKHR::IDENTITY)
-            {
-                vk::SurfaceTransformFlagsKHR::IDENTITY
-            } else {
-                surface_capabilities.current_transform
-            };
-
-            let present_mode = surface_loader
+        let present_mode = unsafe {
+            surface_loader
                 .get_physical_device_surface_present_modes(physical_device, surface)
                 .unwrap()
                 .iter()
                 .cloned()
                 .find(|&mode| mode == vk::PresentModeKHR::MAILBOX)
-                .unwrap_or(vk::PresentModeKHR::FIFO);
+                .unwrap_or(vk::PresentModeKHR::FIFO)
+        };
 
-            let swapchain_loader = swapchain::Device::new(&inst, &device);
-            let swapchain_createinfo = vk::SwapchainCreateInfoKHR::default()
-                .surface(surface)
-                .min_image_count(desired_image_count)
-                .image_color_space(surface_format.color_space)
-                .image_format(surface_format.format)
-                .image_extent(surface_resolution)
-                .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-                .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-                .pre_transform(pre_transform)
-                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-                .present_mode(present_mode)
-                .clipped(true)
-                .image_array_layers(1);
+        let swapchain = Swapchain::new(
+            &inst,
+            &device,
+            surface,
+            surface_format,
+            &surface_capabilities,
+            present_mode,
+            vk::Extent2D {
+                width: window.inner_size().width,
+                height: window.inner_size().height,
+            },
+        );
 
-            let swapchain = swapchain_loader
-                .create_swapchain(&swapchain_createinfo, None)
-                .unwrap();
-
-            (swapchain_loader, swapchain, surface_resolution)
+        let present_image_views = unsafe {
+            let views: Vec<vk::ImageView> = swapchain
+                .present_images()
+                .iter()
+                .map(|image| {
+                    let view_createinfo = vk::ImageViewCreateInfo::default()
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(surface_format.format)
+                        .components(vk::ComponentMapping {
+                            r: vk::ComponentSwizzle::R,
+                            g: vk::ComponentSwizzle::G,
+                            b: vk::ComponentSwizzle::B,
+                            a: vk::ComponentSwizzle::A,
+                        })
+                        .subresource_range(vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        })
+                        .image(*image);
+                    device
+                        .create_image_view(&view_createinfo, None)
+                        .expect("Failed to create image view.")
+                })
+                .collect();
+            views
         };
 
         let cmd_pool = unsafe {
@@ -317,36 +316,6 @@ impl VkBase {
             (cmd_bufs[0], cmd_bufs[1])
         };
 
-        let (present_images, present_image_views) = unsafe {
-            let images = swapchain_loader.get_swapchain_images(swapchain).unwrap();
-            let views: Vec<vk::ImageView> = images
-                .iter()
-                .map(|&image| {
-                    let view_createinfo = vk::ImageViewCreateInfo::default()
-                        .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(surface_format.format)
-                        .components(vk::ComponentMapping {
-                            r: vk::ComponentSwizzle::R,
-                            g: vk::ComponentSwizzle::G,
-                            b: vk::ComponentSwizzle::B,
-                            a: vk::ComponentSwizzle::A,
-                        })
-                        .subresource_range(vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        })
-                        .image(image);
-                    device
-                        .create_image_view(&view_createinfo, None)
-                        .expect("Failed to create image view.")
-                })
-                .collect();
-            (images, views)
-        };
-
         let device_memory_properties =
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
@@ -354,7 +323,7 @@ impl VkBase {
             let depth_image_createinfo = vk::ImageCreateInfo::default()
                 .image_type(vk::ImageType::TYPE_2D)
                 .format(vk::Format::D16_UNORM)
-                .extent(surface_resolution.into())
+                .extent(swapchain.surface_extent().into())
                 .mip_levels(1)
                 .array_layers(1)
                 .samples(vk::SampleCountFlags::TYPE_1)
@@ -442,7 +411,6 @@ impl VkBase {
             debug_util_loader,
             debug_messenger,
             surface_loader,
-            swapchain_loader,
 
             device_memory_properties,
             queue_family_index,
@@ -450,10 +418,8 @@ impl VkBase {
 
             surface,
             surface_format,
-            surface_resolution,
 
             swapchain,
-            present_images,
             present_image_views,
 
             cmd_pool,
@@ -570,12 +536,11 @@ impl Drop for VkBase {
             self.device.free_memory(self.depth_image_memory, None);
             self.device.destroy_image_view(self.depth_image_view, None);
             self.device.destroy_image(self.depth_image, None);
-            for &image_view in self.present_image_views.iter() {
-                self.device.destroy_image_view(image_view, None);
+            for view in &self.present_image_views {
+                self.device.destroy_image_view(*view, None);
             }
+            self.swapchain.destroy();
             self.device.destroy_command_pool(self.cmd_pool, None);
-            self.swapchain_loader
-                .destroy_swapchain(self.swapchain, None);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);
             self.debug_util_loader
@@ -659,10 +624,12 @@ impl App {
 
             let dependencies = [vk::SubpassDependency {
                 src_subpass: vk::SUBPASS_EXTERNAL,
+                dst_subpass: 0,
                 src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access_mask: vk::AccessFlags::NONE_KHR,
                 dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_READ
                     | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 ..Default::default()
             }];
 
@@ -684,6 +651,7 @@ impl App {
             }
         };
 
+        let surface_extent = vk_base.swapchain.surface_extent();
         self.framebuffers = vk_base
             .present_image_views
             .iter()
@@ -692,8 +660,8 @@ impl App {
                 let framebuffer_createinfo = vk::FramebufferCreateInfo::default()
                     .render_pass(self.renderpass)
                     .attachments(&framebuffer_attachments)
-                    .width(vk_base.surface_resolution.width)
-                    .height(vk_base.surface_resolution.height)
+                    .width(surface_extent.width)
+                    .height(surface_extent.height)
                     .layers(1);
                 unsafe {
                     vk_base
@@ -870,13 +838,13 @@ impl App {
         self.viewports = vec![vk::Viewport {
             x: 0.0,
             y: 0.0,
-            width: vk_base.surface_resolution.width as f32,
-            height: vk_base.surface_resolution.height as f32,
+            width: surface_extent.width as f32,
+            height: surface_extent.height as f32,
             min_depth: 0.0,
             max_depth: 1.0,
         }];
 
-        self.scissors = vec![vk_base.surface_resolution.into()];
+        self.scissors = vec![surface_extent.into()];
 
         self.graphics_pipelines = {
             self.pipeline_layout = unsafe {
@@ -1044,30 +1012,22 @@ impl App {
         }
     }
 
-    pub fn draw(&self, frame_count: usize) {
+    pub fn draw(&mut self) {
         let vk_base = if let Some(base) = self.vk_base.as_ref() {
             base
         } else {
             return;
         };
 
-        let inflight_frame_index = frame_count % vk_base.max_frames_inflight;
+        let inflight_frame_index = self.frame_count % vk_base.max_frames_inflight;
         let present_complete_semaphore =
             vk_base.present_complete_semaphores[inflight_frame_index as usize];
         let render_complete_semaphore =
             vk_base.render_complete_semaphores[inflight_frame_index as usize];
 
-        let (present_index, _) = unsafe {
-            vk_base
-                .swapchain_loader
-                .acquire_next_image(
-                    vk_base.swapchain,
-                    u64::MAX,
-                    present_complete_semaphore,
-                    vk::Fence::null(),
-                )
-                .unwrap()
-        };
+        let present_index = vk_base
+            .swapchain
+            .acquire_next_image(present_complete_semaphore);
 
         let clear_values = [
             vk::ClearValue {
@@ -1086,7 +1046,7 @@ impl App {
         let render_pass_begin_info = vk::RenderPassBeginInfo::default()
             .render_pass(self.renderpass)
             .framebuffer(self.framebuffers[present_index as usize])
-            .render_area(vk_base.surface_resolution.into())
+            .render_area(vk_base.swapchain.surface_extent().into())
             .clear_values(&clear_values);
 
         let frame_fence = vk_base.frame_fences[inflight_frame_index];
@@ -1135,20 +1095,11 @@ impl App {
             },
         );
 
-        let wait_semaphores = [render_complete_semaphore];
-        let swapchains = [vk_base.swapchain];
-        let image_indices = [present_index];
-        let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(&wait_semaphores)
-            .swapchains(&swapchains)
-            .image_indices(&image_indices);
-
-        unsafe {
-            vk_base
-                .swapchain_loader
-                .queue_present(vk_base.present_queue, &present_info)
-                .unwrap()
-        };
+        vk_base.swapchain.queue_present(
+            vk_base.present_queue,
+            render_complete_semaphore,
+            present_index,
+        );
 
         /*
         if frame_count >= vk_base.max_frames_inflight {
@@ -1168,6 +1119,9 @@ impl App {
         unsafe {
             vk_base.device.device_wait_idle().unwrap();
         }
+
+        assert!(self.frame_count < usize::MAX);
+        self.frame_count += 1;
     }
 }
 
@@ -1198,11 +1152,12 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                self.draw(self.frame_count);
-
-                assert!(self.frame_count < usize::MAX);
-                self.frame_count += 1;
+                println!("[DEBUG LINW] redraw requested.");
+                self.draw();
             }
+            // WindowEvent::Resized(new_extent) => {
+            //     self.window.as_ref().unwrap().request_redraw();
+            // }
             _ => (),
         }
     }
