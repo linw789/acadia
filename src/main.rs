@@ -144,7 +144,7 @@ impl VkBase {
                 .enabled_extension_names(&extension_names)
                 .flags(create_flags);
 
-            unsafe { entry.create_instance(&createinfo, None)? }
+            unsafe { entry.create_instance(&createinfo, None).unwrap() }
         };
 
         let (debug_util_loader, debug_messenger) = {
@@ -162,8 +162,11 @@ impl VkBase {
                 .pfn_user_callback(Some(vulkan_debug_callback));
 
             let debug_util_loader = debug_utils::Instance::new(&entry, &inst);
-            let debug_messenger =
-                unsafe { debug_util_loader.create_debug_utils_messenger(&debuginfo, None)? };
+            let debug_messenger = unsafe {
+                debug_util_loader
+                    .create_debug_utils_messenger(&debuginfo, None)
+                    .unwrap()
+            };
             (debug_util_loader, debug_messenger)
         };
 
@@ -171,8 +174,8 @@ impl VkBase {
             ash_window::create_surface(
                 &entry,
                 &inst,
-                window.display_handle()?.as_raw(),
-                window.window_handle()?.as_raw(),
+                window.display_handle().unwrap().as_raw(),
+                window.window_handle().unwrap().as_raw(),
                 None,
             )
             .unwrap()
@@ -180,7 +183,7 @@ impl VkBase {
         let surface_loader = surface::Instance::new(&entry, &inst);
 
         let (physical_device, queue_family_index) = unsafe {
-            let phy_devices = inst.enumerate_physical_devices()?;
+            let phy_devices = inst.enumerate_physical_devices().unwrap();
             let (physical_device, graphics_queue_family_index) = phy_devices
                 .iter()
                 .find_map(|physical_device| {
@@ -223,7 +226,10 @@ impl VkBase {
                 .queue_create_infos(std::slice::from_ref(&queue_info))
                 .enabled_extension_names(&device_extension_names_raw)
                 .enabled_features(&features);
-            unsafe { inst.create_device(physical_device, &device_createinfo, None)? }
+            unsafe {
+                inst.create_device(physical_device, &device_createinfo, None)
+                    .unwrap()
+            }
         };
 
         let present_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
@@ -305,12 +311,14 @@ impl VkBase {
                 .command_buffer_count(2)
                 .command_pool(cmd_pool)
                 .level(vk::CommandBufferLevel::PRIMARY);
-            let cmd_bufs = device.allocate_command_buffers(&cmd_buf_allocateinfo)?;
+            let cmd_bufs = device
+                .allocate_command_buffers(&cmd_buf_allocateinfo)
+                .unwrap();
             (cmd_bufs[0], cmd_bufs[1])
         };
 
         let (present_images, present_image_views) = unsafe {
-            let images = swapchain_loader.get_swapchain_images(swapchain)?;
+            let images = swapchain_loader.get_swapchain_images(swapchain).unwrap();
             let views: Vec<vk::ImageView> = images
                 .iter()
                 .map(|&image| {
@@ -611,7 +619,7 @@ impl App {
         self.vk_base = None;
     }
 
-    pub fn size(mut self, width: u32, height: u32) -> Self {
+    pub fn window_size(mut self, width: u32, height: u32) -> Self {
         self.window_width = width;
         self.window_height = height;
         self
@@ -1064,7 +1072,7 @@ impl App {
         let clear_values = [
             vk::ClearValue {
                 color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 0.0],
+                    uint32: [48, 10, 36, 0],
                 },
             },
             vk::ClearValue {
@@ -1204,7 +1212,7 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::default().size(1024, 768);
+    let mut app = App::default().window_size(1024, 768);
 
     let _result = event_loop.run_app(&mut app);
 }
