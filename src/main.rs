@@ -80,6 +80,7 @@ struct Vertex {
     color: [f32; 4],
 }
 
+#[derive(Default)]
 struct Image {
     image: vk::Image,
     view: vk::ImageView,
@@ -411,8 +412,8 @@ impl VkBase {
         let device_memory_properties =
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
-        let depth_image =
-            Image::new_depth_image(&device, device_memory_properties, swapchain.image_extent());
+        let depth_image = Image::default();
+        // Image::new_depth_image(&device, device_memory_properties, swapchain.image_extent());
 
         let fence_setup_cmd_reuse = unsafe {
             let create_info = vk::FenceCreateInfo::default();
@@ -580,7 +581,7 @@ impl VkBase {
 
         if recreated {
             self.update_present_image_views();
-            self.update_depth_image();
+            // self.update_depth_image();
         }
 
         recreated
@@ -671,7 +672,7 @@ struct App {
 impl App {
     fn init_vk(&mut self) {
         self.vk_base = VkBase::new(self.window.as_ref().unwrap()).ok();
-        self.vk_base.as_ref().unwrap().setup();
+        // self.vk_base.as_ref().unwrap().setup();
     }
 
     fn destroy_vk(&mut self) {
@@ -697,14 +698,14 @@ impl App {
                     final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
                     ..Default::default()
                 },
-                vk::AttachmentDescription {
-                    format: vk::Format::D16_UNORM,
-                    samples: vk::SampleCountFlags::TYPE_1,
-                    load_op: vk::AttachmentLoadOp::CLEAR,
-                    initial_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    ..Default::default()
-                },
+                // vk::AttachmentDescription {
+                //     format: vk::Format::D16_UNORM,
+                //     samples: vk::SampleCountFlags::TYPE_1,
+                //     load_op: vk::AttachmentLoadOp::CLEAR,
+                //     initial_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                //     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                //     ..Default::default()
+                // },
             ];
 
             let color_attachment_refs = [vk::AttachmentReference {
@@ -729,7 +730,7 @@ impl App {
 
             let subpass = vk::SubpassDescription::default()
                 .color_attachments(&color_attachment_refs)
-                .depth_stencil_attachment(&depth_attachment_refs)
+                // .depth_stencil_attachment(&depth_attachment_refs)
                 .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS);
 
             let renderpass_createinfo = vk::RenderPassCreateInfo::default()
@@ -750,7 +751,8 @@ impl App {
             .present_image_views
             .iter()
             .map(|&present_image_view| {
-                let framebuffer_attachments = [present_image_view, vk_base.depth_image.view];
+                let framebuffer_attachments =
+                    [present_image_view /*, vk_base.depth_image.view*/];
                 let framebuffer_createinfo = vk::FramebufferCreateInfo::default()
                     .render_pass(self.renderpass)
                     .attachments(&framebuffer_attachments)
@@ -1055,7 +1057,7 @@ impl App {
                 .viewport_state(&viewport_state_info)
                 .rasterization_state(&rasterization_info)
                 .multisample_state(&multisample_state_info)
-                .depth_stencil_state(&depth_state_info)
+                // .depth_stencil_state(&depth_state_info)
                 .color_blend_state(&color_blend_state)
                 .dynamic_state(&dynamic_state_info)
                 .layout(self.pipeline_layout)
@@ -1118,7 +1120,7 @@ impl App {
 
         let image_extent = vk_base.swapchain.image_extent();
         for image_view in &vk_base.present_image_views {
-            let framebuffer_attachments = [*image_view, vk_base.depth_image.view];
+            let framebuffer_attachments = [*image_view /*, vk_base.depth_image.view*/];
             let framebuffer_createinfo = vk::FramebufferCreateInfo::default()
                 .render_pass(self.renderpass)
                 .attachments(&framebuffer_attachments)
@@ -1158,12 +1160,12 @@ impl App {
                     uint32: [48, 10, 36, 0],
                 },
             },
-            vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                },
-            },
+            // vk::ClearValue {
+            //     depth_stencil: vk::ClearDepthStencilValue {
+            //         depth: 1.0,
+            //         stencil: 0,
+            //     },
+            // },
         ];
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::default()
