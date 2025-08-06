@@ -1101,8 +1101,18 @@ impl App {
                     self.graphics_pipelines[0],
                 );
 
-                device.cmd_set_viewport(cmd_buf_draw, 0, &self.viewports);
-                device.cmd_set_scissor(cmd_buf_draw, 0, &self.scissors);
+                let image_extent = vk_base.swapchain.image_extent();
+                let viewport = vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: image_extent.width as f32,
+                    height: image_extent.height as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                };
+                let scissor: vk::Rect2D = image_extent.into();
+                device.cmd_set_viewport(cmd_buf_draw, 0, &[viewport]);
+                device.cmd_set_scissor(cmd_buf_draw, 0, &[scissor]);
 
                 device.cmd_bind_vertex_buffers(cmd_buf_draw, 0, &[self.vertex_input_buffer], &[0]);
 
