@@ -37,7 +37,8 @@ impl Swapchain {
         sc
     }
 
-    /// Re-create
+    /// Re-create a swapchain if necessary. Return true if a new swapchain has been created, otherwise
+    /// false.
     pub fn recreate(
         &mut self,
         device: &Device,

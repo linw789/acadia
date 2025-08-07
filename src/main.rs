@@ -70,6 +70,22 @@ struct Vertex {
     color: [f32; 4],
 }
 
+fn pick_present_image_format(surface_formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
+    let mut format_index = 0;
+    for (i, sf) in surface_formats.iter().enumerate() {
+        if (sf.format == vk::Format::R8G8B8A8_UNORM) || (sf.format == vk::Format::B8G8R8A8_UNORM) {
+            format_index = i;
+            break;
+        }
+    }
+    let result = surface_formats[format_index];
+    assert!(
+        result.format != vk::Format::UNDEFINED,
+        "Failed to find a proper surface format."
+    );
+    result
+}
+
 fn create_present_image_views(
     device: &Device,
     images: &[vk::Image],
@@ -255,11 +271,14 @@ impl VkBase {
 
         let present_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
-        let surface_format = unsafe {
+        let surface_formats = unsafe {
             surface_loader
                 .get_physical_device_surface_formats(physical_device, surface)
-                .unwrap()[0]
+                .unwrap()
         };
+        let surface_format = pick_present_image_format(&surface_formats);
+        println!("[DEBUG LINW] picked surface format: {:?}", surface_format);
+
         let surface_capabilities = unsafe {
             surface_loader
                 .get_physical_device_surface_capabilities(physical_device, surface)
@@ -1063,7 +1082,7 @@ impl App {
         let clear_values = [
             vk::ClearValue {
                 color: vk::ClearColorValue {
-                    uint32: [48, 10, 36, 0],
+                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
                 },
             },
             // vk::ClearValue {
