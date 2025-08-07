@@ -1,3 +1,4 @@
+mod buffer;
 mod common;
 mod image;
 mod mesh;
@@ -17,6 +18,7 @@ use ::winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
+use buffer::Buffer;
 use common::Vertex;
 use image::Image;
 use mesh::Mesh;
@@ -577,11 +579,9 @@ struct App {
     renderpass: vk::RenderPass,
     framebuffers: Vec<vk::Framebuffer>,
     pipeline_layout: vk::PipelineLayout,
-    index_buffer_data: Vec<u32>,
-    index_buffer: vk::Buffer,
-    index_buffer_memory: vk::DeviceMemory,
-    vertex_input_buffer: vk::Buffer,
-    vertex_input_buffer_memory: vk::DeviceMemory,
+    mesh: Mesh,
+    index_buffer: Buffer,
+    vertex_buffer: Buffer,
     vertex_shader_module: vk::ShaderModule,
     fragment_shader_module: vk::ShaderModule,
     viewports: Vec<vk::Viewport>,
@@ -689,130 +689,24 @@ impl App {
                 }
             })
             .collect();
-        let mesh = Mesh::from_obj("./assets/triangle.obj");
-        self.index_buffer_data = mesh.indices;
 
-        self.index_buffer = {
-            let index_buf_createinfo = vk::BufferCreateInfo::default()
-                .size(array_size(&self.index_buffer_data) as u64)
-                .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-                .sharing_mode(vk::SharingMode::EXCLUSIVE);
-            unsafe {
-                vk_base
-                    .device
-                    .create_buffer(&index_buf_createinfo, None)
-                    .expect("Failed to create index buffer.")
-            }
-        };
+        self.mesh = Mesh::from_obj("./assets/triangle.obj");
 
-        self.index_buffer_memory = unsafe {
-            let index_buffer_memory_req = vk_base
-                .device
-                .get_buffer_memory_requirements(self.index_buffer);
-            let index_buffer_memory_index = find_memorytype_index(
-                &index_buffer_memory_req,
-                &vk_base.device_memory_properties,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            )
-            .expect("Unable to find suitable memorytype for the index buffer.");
+        self.index_buffer = Buffer::new(
+            &vk_base.device,
+            (size_of::<u32>() * self.mesh.indices.len()) as u64,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            &vk_base.device_memory_properties,
+        );
+        self.index_buffer.copy_data(&self.mesh.indices);
 
-            let index_allocate_info = vk::MemoryAllocateInfo {
-                allocation_size: index_buffer_memory_req.size,
-                memory_type_index: index_buffer_memory_index,
-                ..Default::default()
-            };
-            let index_buf_memory = vk_base
-                .device
-                .allocate_memory(&index_allocate_info, None)
-                .unwrap();
-
-            let index_ptr = vk_base
-                .device
-                .map_memory(
-                    index_buf_memory,
-                    0,
-                    index_buffer_memory_req.size,
-                    vk::MemoryMapFlags::empty(),
-                )
-                .unwrap();
-
-            let mut index_slice = Align::new(
-                index_ptr,
-                align_of::<u32>() as u64,
-                index_buffer_memory_req.size,
-            );
-            index_slice.copy_from_slice(&self.index_buffer_data);
-
-            vk_base.device.unmap_memory(index_buf_memory);
-            vk_base
-                .device
-                .bind_buffer_memory(self.index_buffer, index_buf_memory, 0)
-                .unwrap();
-
-            index_buf_memory
-        };
-
-        self.vertex_input_buffer = unsafe {
-            let vertex_input_buf_createinfo = vk::BufferCreateInfo {
-                size: 3 * size_of::<Vertex>() as u64,
-                usage: vk::BufferUsageFlags::VERTEX_BUFFER,
-                sharing_mode: vk::SharingMode::EXCLUSIVE,
-                ..Default::default()
-            };
-            vk_base
-                .device
-                .create_buffer(&vertex_input_buf_createinfo, None)
-                .unwrap()
-        };
-
-        self.vertex_input_buffer_memory = unsafe {
-            let vertex_input_buffer_memory_req = vk_base
-                .device
-                .get_buffer_memory_requirements(self.vertex_input_buffer);
-
-            let vertex_input_buffer_memory_index = find_memorytype_index(
-                &vertex_input_buffer_memory_req,
-                &vk_base.device_memory_properties,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            )
-            .expect("Unable to find suitable memorytype for the vertex buffer.");
-
-            let vertex_buffer_allocate_info = vk::MemoryAllocateInfo {
-                allocation_size: vertex_input_buffer_memory_req.size,
-                memory_type_index: vertex_input_buffer_memory_index,
-                ..Default::default()
-            };
-
-            let vertex_input_buffer_memory = vk_base
-                .device
-                .allocate_memory(&vertex_buffer_allocate_info, None)
-                .unwrap();
-
-            let vertices = mesh.vertices;
-            let vert_ptr = vk_base
-                .device
-                .map_memory(
-                    vertex_input_buffer_memory,
-                    0,
-                    vertex_input_buffer_memory_req.size,
-                    vk::MemoryMapFlags::empty(),
-                )
-                .unwrap();
-
-            let mut vert_align = Align::new(
-                vert_ptr,
-                align_of::<Vertex>() as u64,
-                vertex_input_buffer_memory_req.size,
-            );
-            vert_align.copy_from_slice(&vertices);
-            vk_base.device.unmap_memory(vertex_input_buffer_memory);
-            vk_base
-                .device
-                .bind_buffer_memory(self.vertex_input_buffer, vertex_input_buffer_memory, 0)
-                .unwrap();
-
-            vertex_input_buffer_memory
-        };
+        self.vertex_buffer = Buffer::new(
+            &vk_base.device,
+            (size_of::<Vertex>() * self.mesh.vertices.len()) as u64,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            &vk_base.device_memory_properties,
+        );
+        self.vertex_buffer.copy_data(&self.mesh.vertices);
 
         self.vertex_shader_module = unsafe {
             let vertex_spv = {
@@ -1001,14 +895,8 @@ impl App {
             vk_base
                 .device
                 .destroy_shader_module(self.fragment_shader_module, None);
-            vk_base.device.free_memory(self.index_buffer_memory, None);
-            vk_base.device.destroy_buffer(self.index_buffer, None);
-            vk_base
-                .device
-                .free_memory(self.vertex_input_buffer_memory, None);
-            vk_base
-                .device
-                .destroy_buffer(self.vertex_input_buffer, None);
+            self.index_buffer.destroy(&vk_base.device);
+            self.vertex_buffer.destroy(&vk_base.device);
             for framebuffer in &self.framebuffers {
                 vk_base.device.destroy_framebuffer(*framebuffer, None);
             }
@@ -1116,23 +1004,16 @@ impl App {
                 device.cmd_set_viewport(cmd_buf_draw, 0, &[viewport]);
                 device.cmd_set_scissor(cmd_buf_draw, 0, &[scissor]);
 
-                device.cmd_bind_vertex_buffers(cmd_buf_draw, 0, &[self.vertex_input_buffer], &[0]);
+                device.cmd_bind_vertex_buffers(cmd_buf_draw, 0, &[self.vertex_buffer.buf], &[0]);
 
                 device.cmd_bind_index_buffer(
                     cmd_buf_draw,
-                    self.index_buffer,
+                    self.index_buffer.buf,
                     0,
                     vk::IndexType::UINT32,
                 );
 
-                device.cmd_draw_indexed(
-                    cmd_buf_draw,
-                    self.index_buffer_data.len() as u32,
-                    1,
-                    0,
-                    0,
-                    1,
-                );
+                device.cmd_draw_indexed(cmd_buf_draw, self.mesh.indices.len() as u32, 1, 0, 0, 1);
 
                 device.cmd_end_render_pass(cmd_buf_draw);
             },
