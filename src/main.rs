@@ -1,4 +1,6 @@
+mod common;
 mod image;
+mod mesh;
 mod swapchain;
 mod util;
 
@@ -15,8 +17,10 @@ use ::winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
+use common::Vertex;
 use image::Image;
-use std::{borrow::Cow, error::Error, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec};
+use mesh::Mesh;
+use std::{borrow::Cow, error::Error, ffi, fs::File, io::Cursor, os::raw::c_char, u32, vec::Vec};
 use swapchain::Swapchain;
 use util::find_memorytype_index;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -63,14 +67,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     vk::FALSE
 }
 
-#[derive(Clone, Debug, Copy)]
-#[repr(C)]
-struct Vertex {
-    pos: [f32; 4],
-    color: [f32; 4],
-}
-
-fn pick_present_image_format(surface_formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
+pub fn pick_present_image_format(surface_formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
     let mut format_index = 0;
     for (i, sf) in surface_formats.iter().enumerate() {
         if (sf.format == vk::Format::R8G8B8A8_UNORM) || (sf.format == vk::Format::B8G8R8A8_UNORM) {
@@ -692,8 +689,8 @@ impl App {
                 }
             })
             .collect();
-
-        self.index_buffer_data = vec![0, 1, 2];
+        let mesh = Mesh::from_obj("./assets/triangle.obj");
+        self.index_buffer_data = mesh.indices;
 
         self.index_buffer = {
             let index_buf_createinfo = vk::BufferCreateInfo::default()
@@ -791,21 +788,7 @@ impl App {
                 .allocate_memory(&vertex_buffer_allocate_info, None)
                 .unwrap();
 
-            let vertices = [
-                Vertex {
-                    pos: [-1.0, 1.0, 0.0, 1.0],
-                    color: [0.0, 1.0, 0.0, 1.0],
-                },
-                Vertex {
-                    pos: [1.0, 1.0, 0.0, 1.0],
-                    color: [0.0, 0.0, 1.0, 1.0],
-                },
-                Vertex {
-                    pos: [0.0, -1.0, 0.0, 1.0],
-                    color: [1.0, 0.0, 0.0, 1.0],
-                },
-            ];
-
+            let vertices = mesh.vertices;
             let vert_ptr = vk_base
                 .device
                 .map_memory(

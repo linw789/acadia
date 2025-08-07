@@ -1,9 +1,9 @@
-use ::ash::vk;
+use ::ash::vk::{MemoryPropertyFlags, MemoryRequirements, PhysicalDeviceMemoryProperties};
 
 pub fn find_memorytype_index(
-    memory_req: &vk::MemoryRequirements,
-    memory_prop: &vk::PhysicalDeviceMemoryProperties,
-    flags: vk::MemoryPropertyFlags,
+    memory_req: &MemoryRequirements,
+    memory_prop: &PhysicalDeviceMemoryProperties,
+    flags: MemoryPropertyFlags,
 ) -> Option<u32> {
     memory_prop.memory_types[..memory_prop.memory_type_count as _]
         .iter()
