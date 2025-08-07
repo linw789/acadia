@@ -690,7 +690,7 @@ impl App {
             })
             .collect();
 
-        self.mesh = Mesh::from_obj("./assets/triangle.obj");
+        self.mesh = Mesh::from_obj("./assets/stanford-bunny.obj");
 
         self.index_buffer = Buffer::new(
             &vk_base.device,
