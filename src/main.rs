@@ -1,4 +1,5 @@
 mod buffer;
+mod camera;
 mod common;
 mod image;
 mod mesh;
@@ -19,12 +20,13 @@ use ::winit::{
     window::{Window, WindowId},
 };
 use buffer::Buffer;
+use camera::Camera;
 use common::Vertex;
+use glam::{Mat4, Vec3};
 use image::Image;
 use mesh::Mesh;
-use std::{borrow::Cow, error::Error, ffi, fs::File, io::Cursor, os::raw::c_char, u32, vec::Vec};
+use std::{borrow::Cow, error::Error, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec};
 use swapchain::Swapchain;
-use util::find_memorytype_index;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 macro_rules! offset_of {
@@ -149,7 +151,7 @@ struct VkBase {
     pub present_complete_semaphores: Vec<vk::Semaphore>,
     pub render_complete_semaphores: Vec<vk::Semaphore>,
 
-    pub max_frames_inflight: usize,
+    pub max_frames_in_flight: usize,
 }
 
 impl VkBase {
@@ -346,10 +348,10 @@ impl VkBase {
                 .expect("Failed to create fence.")
         };
 
-        let max_frames_inflight = 1; // present_image_views.len();
+        let max_frames_in_flight = 1; // present_image_views.len();
 
-        let mut frame_fences = Vec::with_capacity(max_frames_inflight);
-        for _ in 0..max_frames_inflight {
+        let mut frame_fences = Vec::with_capacity(max_frames_in_flight);
+        for _ in 0..max_frames_in_flight {
             let create_info = vk::FenceCreateInfo::default();
             let fence = unsafe {
                 device
@@ -359,9 +361,9 @@ impl VkBase {
             frame_fences.push(fence);
         }
 
-        let mut present_complete_semaphores = Vec::with_capacity(max_frames_inflight);
-        let mut render_complete_semaphores = Vec::with_capacity(max_frames_inflight);
-        for _ in 0..max_frames_inflight {
+        let mut present_complete_semaphores = Vec::with_capacity(max_frames_in_flight);
+        let mut render_complete_semaphores = Vec::with_capacity(max_frames_in_flight);
+        for _ in 0..max_frames_in_flight {
             let createinfo = vk::SemaphoreCreateInfo::default();
             let (present_sema, render_sema) = unsafe {
                 (
@@ -404,7 +406,7 @@ impl VkBase {
             present_complete_semaphores,
             render_complete_semaphores,
 
-            max_frames_inflight,
+            max_frames_in_flight,
         })
     }
 
@@ -570,7 +572,7 @@ impl Drop for VkBase {
 }
 
 #[derive(Default)]
-struct App {
+struct App<'a> {
     window_width: u32,
     window_height: u32,
     window: Option<Window>,
@@ -578,6 +580,12 @@ struct App {
 
     renderpass: vk::RenderPass,
     framebuffers: Vec<vk::Framebuffer>,
+    // TODO: why do bindings need a lifetime?
+    desc_set_layout_bindings: Vec<vk::DescriptorSetLayoutBinding<'a>>,
+    desc_set_layouts: Vec<vk::DescriptorSetLayout>,
+    desc_pool: vk::DescriptorPool,
+    desc_sets: Vec<vk::DescriptorSet>,
+    desc_buf_infos: Vec<vk::DescriptorBufferInfo>,
     pipeline_layout: vk::PipelineLayout,
     mesh: Mesh,
     index_buffer: Buffer,
@@ -589,9 +597,12 @@ struct App {
     graphics_pipelines: Vec<vk::Pipeline>,
 
     frame_count: usize,
+
+    camera: Camera,
+    transform_buffer: Buffer,
 }
 
-impl App {
+impl<'a> App<'a> {
     fn init_vk(&mut self) {
         self.vk_base = VkBase::new(self.window.as_ref().unwrap()).ok();
         // self.vk_base.as_ref().unwrap().setup();
@@ -708,6 +719,19 @@ impl App {
         );
         self.vertex_buffer.copy_data(&self.mesh.vertices);
 
+        self.camera = Camera::new(
+            Vec3::new(0.0, 0.0, 1.0),
+            40.0 / 180.0 * std::f32::consts::PI,
+            1.0,
+        );
+
+        self.transform_buffer = Buffer::new(
+            &vk_base.device,
+            (size_of::<Mat4>() * 2 * vk_base.max_frames_in_flight) as u64,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            &vk_base.device_memory_properties,
+        );
+
         self.vertex_shader_module = unsafe {
             let vertex_spv = {
                 let mut file =
@@ -744,9 +768,84 @@ impl App {
 
         self.scissors = vec![image_extent.into()];
 
+        self.desc_set_layout_bindings = {
+            let layout_binding = vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX);
+            vec![layout_binding]
+        };
+
+        self.desc_set_layouts = {
+            let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
+                .bindings(&self.desc_set_layout_bindings);
+            let layout = unsafe {
+                vk_base
+                    .device
+                    .create_descriptor_set_layout(&layout_info, None)
+                    .unwrap()
+            };
+            vec![layout]
+        };
+
+        self.desc_pool = {
+            let pool_sizes = [vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: vk_base.max_frames_in_flight as u32,
+            }];
+
+            let pool_createinfo = vk::DescriptorPoolCreateInfo::default()
+                .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+                .max_sets(vk_base.max_frames_in_flight as u32)
+                .pool_sizes(&pool_sizes);
+
+            unsafe {
+                vk_base
+                    .device
+                    .create_descriptor_pool(&pool_createinfo, None)
+                    .unwrap()
+            }
+        };
+
+        self.desc_sets = {
+            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .set_layouts(&self.desc_set_layouts)
+                .descriptor_pool(self.desc_pool);
+
+            unsafe {
+                vk_base
+                    .device
+                    .allocate_descriptor_sets(&desc_set_alloc_info)
+                    .unwrap()
+            }
+        };
+
+        self.desc_buf_infos = (0..vk_base.max_frames_in_flight)
+            .into_iter()
+            .map(|_| {
+                vk::DescriptorBufferInfo::default()
+                    .buffer(self.transform_buffer.buf)
+                    .offset(0)
+                    .range((size_of::<Mat4>() * 2) as u64)
+            })
+            .collect();
+
+        let desc_write = vk::WriteDescriptorSet::default()
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .dst_set(self.desc_sets[0])
+            .dst_binding(0)
+            .dst_array_element(0)
+            .buffer_info(&self.desc_buf_infos);
+
+        unsafe {
+            vk_base.device.update_descriptor_sets(&[desc_write], &[]);
+        }
+
         self.graphics_pipelines = {
             self.pipeline_layout = unsafe {
-                let layout_createinfo = vk::PipelineLayoutCreateInfo::default();
+                let layout_createinfo =
+                    vk::PipelineLayoutCreateInfo::default().set_layouts(&self.desc_set_layouts);
                 vk_base
                     .device
                     .create_pipeline_layout(&layout_createinfo, None)
@@ -792,8 +891,8 @@ impl App {
             ];
 
             let vertex_input_state_info = vk::PipelineVertexInputStateCreateInfo::default()
-                .vertex_attribute_descriptions(&vertex_input_attribute_descriptions)
-                .vertex_binding_descriptions(&vertex_input_binding_descriptions);
+                .vertex_binding_descriptions(&vertex_input_binding_descriptions)
+                .vertex_attribute_descriptions(&vertex_input_attribute_descriptions);
 
             let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
                 topology: vk::PrimitiveTopology::TRIANGLE_LIST,
@@ -886,6 +985,9 @@ impl App {
             for pipeline in &self.graphics_pipelines {
                 vk_base.device.destroy_pipeline(*pipeline, None);
             }
+            for layout in &self.desc_set_layouts {
+                vk_base.device.destroy_descriptor_set_layout(*layout, None);
+            }
             vk_base
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
@@ -897,6 +999,7 @@ impl App {
                 .destroy_shader_module(self.fragment_shader_module, None);
             self.index_buffer.destroy(&vk_base.device);
             self.vertex_buffer.destroy(&vk_base.device);
+            self.transform_buffer.destroy(&vk_base.device);
             for framebuffer in &self.framebuffers {
                 vk_base.device.destroy_framebuffer(*framebuffer, None);
             }
@@ -940,11 +1043,11 @@ impl App {
             return;
         };
 
-        let inflight_frame_index = self.frame_count % vk_base.max_frames_inflight;
+        let in_flight_frame_index = self.frame_count % vk_base.max_frames_in_flight;
         let present_complete_semaphore =
-            vk_base.present_complete_semaphores[inflight_frame_index as usize];
+            vk_base.present_complete_semaphores[in_flight_frame_index as usize];
         let render_complete_semaphore =
-            vk_base.render_complete_semaphores[inflight_frame_index as usize];
+            vk_base.render_complete_semaphores[in_flight_frame_index as usize];
 
         let present_index = vk_base
             .swapchain
@@ -970,7 +1073,18 @@ impl App {
             .render_area(vk_base.swapchain.image_extent().into())
             .clear_values(&clear_values);
 
-        let frame_fence = vk_base.frame_fences[inflight_frame_index];
+        let image_extent = vk_base.swapchain.image_extent();
+        let view_matrix = self.camera.view_matrix();
+        let pers_matrix = self
+            .camera
+            .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
+        let mvp = [view_matrix, pers_matrix];
+        // TODO: We definitely need to protect this write over different frames.
+        //       Or maybe we need to copy mvp into different parts of the buffer for
+        //       different frames?
+        self.transform_buffer.copy_data(&mvp);
+
+        let frame_fence = vk_base.frame_fences[in_flight_frame_index];
         vk_base.record_submit_cmd_buf(
             vk_base.cmd_buf_draw,
             vk::Fence::null(),
@@ -1006,6 +1120,15 @@ impl App {
 
                 device.cmd_bind_vertex_buffers(cmd_buf_draw, 0, &[self.vertex_buffer.buf], &[0]);
 
+                device.cmd_bind_descriptor_sets(
+                    cmd_buf_draw,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &self.desc_sets,
+                    &[],
+                );
+
                 device.cmd_bind_index_buffer(
                     cmd_buf_draw,
                     self.index_buffer.buf,
@@ -1026,8 +1149,8 @@ impl App {
         );
 
         /*
-        if frame_count >= vk_base.max_frames_inflight {
-            let wait_index = (frame_count + 1) % vk_base.max_frames_inflight;
+        if frame_count >= vk_base.max_frames_in_flight {
+            let wait_index = (frame_count + 1) % vk_base.max_frames_in_flight;
             let wait_fence = vk_base.frame_fences[wait_index];
 
             unsafe {
@@ -1049,7 +1172,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl<'a> ApplicationHandler for App<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.window = Some(
             event_loop

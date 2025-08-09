@@ -12,3 +12,4 @@ ash = { version = "0.38.0", default-features = false, features = [
 ] }
 ash-window = "0.13.0"
 tobj = "4.0.3"
+glam = { version = "0.30.5", features = ["debug-glam-assert"] }
