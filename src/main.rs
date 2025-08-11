@@ -17,6 +17,7 @@ use ::winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
 use buffer::Buffer;
@@ -25,7 +26,9 @@ use common::Vertex;
 use glam::{Mat4, Vec3};
 use image::Image;
 use mesh::Mesh;
-use std::{borrow::Cow, error::Error, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec};
+use std::{
+    borrow::Cow, error::Error, f32::consts::PI, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec,
+};
 use swapchain::Swapchain;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
@@ -557,7 +560,7 @@ struct App<'a> {
 
     frame_count: usize,
 
-    camera: Camera,
+    pub camera: Camera,
 }
 
 impl<'a> App<'a> {
@@ -721,7 +724,7 @@ impl<'a> App<'a> {
         self.camera = Camera::new(
             Vec3::new(0.0, 0.0, 1.0),
             40.0 / 180.0 * std::f32::consts::PI,
-            1.0,
+            0.5,
         );
 
         let camera_transform_size = size_of::<Mat4>() * 2;
@@ -1140,10 +1143,6 @@ impl<'a> App<'a> {
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
             vk_base.device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
-            vk_base
-                .device
-                .cmd_bind_vertex_buffers(cmd_buf, 0, &[self.vertex_buffer.buf], &[0]);
-
             let camera_transform_size = size_of::<Mat4>() * 2;
             vk_base.device.cmd_bind_descriptor_sets(
                 cmd_buf,
@@ -1153,6 +1152,10 @@ impl<'a> App<'a> {
                 &self.desc_sets,
                 &[(in_flight_frame_index * camera_transform_size) as u32],
             );
+
+            vk_base
+                .device
+                .cmd_bind_vertex_buffers(cmd_buf, 0, &[self.vertex_buffer.buf], &[0]);
 
             vk_base.device.cmd_bind_index_buffer(
                 cmd_buf,
@@ -1220,6 +1223,28 @@ impl<'a> ApplicationHandler for App<'a> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state.is_pressed() {
+                    match event.physical_key {
+                        PhysicalKey::Code(KeyCode::ArrowLeft)
+                        | PhysicalKey::Code(KeyCode::KeyA) => {
+                            self.camera.rotate_y(1.0 / 180.0 * PI)
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowRight)
+                        | PhysicalKey::Code(KeyCode::KeyD) => {
+                            self.camera.rotate_y(-1.0 / 180.0 * PI)
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
+                            self.camera.translate(Vec3::new(0.0, 0.0, -0.01))
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowDown)
+                        | PhysicalKey::Code(KeyCode::KeyS) => {
+                            self.camera.translate(Vec3::new(0.0, 0.0, 0.01))
+                        }
+                        _ => {}
+                    }
+                }
+            }
             WindowEvent::CloseRequested => {
                 println!("[DEBUG LINW] close requested.");
                 self.teardown_pipeline();
@@ -1227,8 +1252,8 @@ impl<'a> ApplicationHandler for App<'a> {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                println!("[DEBUG LINW] redraw requested.");
                 self.draw();
+                self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(size) => {
                 println!("[DEBUG LINW] resized requested");

@@ -23,9 +23,9 @@ impl Camera {
         self.position += t;
     }
 
-    /// Rotate around the local z-axis. `angle` is the rotating angle in radian.
-    pub fn rotate_z(&mut self, angle: f32) {
-        let r = Quat::from_rotation_z(angle);
+    /// Rotate around the local y-axis. `angle` is the rotating angle in radian.
+    pub fn rotate_y(&mut self, angle: f32) {
+        let r = Quat::from_rotation_y(angle);
         self.orientation = r * self.orientation;
         self.orientation = self.orientation.normalize();
     }
