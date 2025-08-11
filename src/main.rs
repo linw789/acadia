@@ -140,18 +140,11 @@ struct VkBase {
     present_image_views: Vec<vk::ImageView>,
 
     pub cmd_pool: vk::CommandPool,
-    pub cmd_buf_draw: vk::CommandBuffer,
     pub cmd_buf_setup: vk::CommandBuffer,
 
     depth_image: Image,
 
     pub fence_setup_cmd_reuse: vk::Fence,
-    pub frame_fences: Vec<vk::Fence>,
-
-    pub present_complete_semaphores: Vec<vk::Semaphore>,
-    pub render_complete_semaphores: Vec<vk::Semaphore>,
-
-    pub max_frames_in_flight: usize,
 }
 
 impl VkBase {
@@ -324,15 +317,15 @@ impl VkBase {
             device.create_command_pool(&pool_createinfo, None).unwrap()
         };
 
-        let (cmd_buf_setup, cmd_buf_draw) = unsafe {
+        let cmd_buf_setup = unsafe {
             let cmd_buf_allocateinfo = vk::CommandBufferAllocateInfo::default()
-                .command_buffer_count(2)
+                .command_buffer_count(1)
                 .command_pool(cmd_pool)
                 .level(vk::CommandBufferLevel::PRIMARY);
             let cmd_bufs = device
                 .allocate_command_buffers(&cmd_buf_allocateinfo)
                 .unwrap();
-            (cmd_bufs[0], cmd_bufs[1])
+            cmd_bufs[0]
         };
 
         let device_memory_properties =
@@ -347,33 +340,6 @@ impl VkBase {
                 .create_fence(&create_info, None)
                 .expect("Failed to create fence.")
         };
-
-        let max_frames_in_flight = 1; // present_image_views.len();
-
-        let mut frame_fences = Vec::with_capacity(max_frames_in_flight);
-        for _ in 0..max_frames_in_flight {
-            let create_info = vk::FenceCreateInfo::default();
-            let fence = unsafe {
-                device
-                    .create_fence(&create_info, None)
-                    .expect("Failed to create fence.")
-            };
-            frame_fences.push(fence);
-        }
-
-        let mut present_complete_semaphores = Vec::with_capacity(max_frames_in_flight);
-        let mut render_complete_semaphores = Vec::with_capacity(max_frames_in_flight);
-        for _ in 0..max_frames_in_flight {
-            let createinfo = vk::SemaphoreCreateInfo::default();
-            let (present_sema, render_sema) = unsafe {
-                (
-                    device.create_semaphore(&createinfo, None).unwrap(),
-                    device.create_semaphore(&createinfo, None).unwrap(),
-                )
-            };
-            present_complete_semaphores.push(present_sema);
-            render_complete_semaphores.push(render_sema);
-        }
 
         Ok(Self {
             inst,
@@ -395,18 +361,11 @@ impl VkBase {
             present_image_views,
 
             cmd_pool,
-            cmd_buf_draw,
             cmd_buf_setup,
 
             depth_image,
 
             fence_setup_cmd_reuse,
-            frame_fences,
-
-            present_complete_semaphores,
-            render_complete_semaphores,
-
-            max_frames_in_flight,
         })
     }
 
@@ -546,15 +505,6 @@ impl VkBase {
 impl Drop for VkBase {
     fn drop(&mut self) {
         unsafe {
-            for sema in &self.present_complete_semaphores {
-                self.device.destroy_semaphore(*sema, None);
-            }
-            for sema in &self.render_complete_semaphores {
-                self.device.destroy_semaphore(*sema, None);
-            }
-            for fence in &self.frame_fences {
-                self.device.destroy_fence(*fence, None);
-            }
             self.device.destroy_fence(self.fence_setup_cmd_reuse, None);
             self.depth_image.destroy(&self.device);
             for view in &self.present_image_views {
@@ -570,6 +520,8 @@ impl Drop for VkBase {
         }
     }
 }
+
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 #[derive(Default)]
 struct App<'a> {
@@ -592,6 +544,13 @@ struct App<'a> {
     vertex_buffer: Buffer,
     vertex_shader_module: vk::ShaderModule,
     fragment_shader_module: vk::ShaderModule,
+
+    frame_data_buffer: Buffer,
+    frame_fences: Vec<vk::Fence>,
+    present_complete_semaphores: Vec<vk::Semaphore>,
+    render_complete_semaphores: Vec<vk::Semaphore>,
+    draw_cmd_bufs: Vec<vk::CommandBuffer>,
+
     viewports: Vec<vk::Viewport>,
     scissors: Vec<vk::Rect2D>,
     graphics_pipelines: Vec<vk::Pipeline>,
@@ -599,7 +558,6 @@ struct App<'a> {
     frame_count: usize,
 
     camera: Camera,
-    transform_buffer: Buffer,
 }
 
 impl<'a> App<'a> {
@@ -620,6 +578,47 @@ impl<'a> App<'a> {
 
     pub fn prepare_pipeline(&mut self) {
         let vk_base = self.vk_base.as_ref().unwrap();
+
+        assert!(MAX_FRAMES_IN_FLIGHT <= vk_base.swapchain.present_images().len());
+
+        self.draw_cmd_bufs = unsafe {
+            let allocinfo = vk::CommandBufferAllocateInfo::default()
+                .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32)
+                .command_pool(vk_base.cmd_pool)
+                .level(vk::CommandBufferLevel::PRIMARY);
+            vk_base.device.allocate_command_buffers(&allocinfo).unwrap()
+        };
+
+        self.frame_fences = unsafe {
+            (0..MAX_FRAMES_IN_FLIGHT)
+                .into_iter()
+                .map(|_| {
+                    let createinfo =
+                        vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
+                    vk_base.device.create_fence(&createinfo, None).unwrap()
+                })
+                .collect()
+        };
+
+        self.present_complete_semaphores = unsafe {
+            (0..MAX_FRAMES_IN_FLIGHT)
+                .into_iter()
+                .map(|_| {
+                    let createinfo = vk::SemaphoreCreateInfo::default();
+                    vk_base.device.create_semaphore(&createinfo, None).unwrap()
+                })
+                .collect()
+        };
+
+        self.render_complete_semaphores = unsafe {
+            (0..vk_base.swapchain.present_images().len())
+                .into_iter()
+                .map(|_| {
+                    let createinfo = vk::SemaphoreCreateInfo::default();
+                    vk_base.device.create_semaphore(&createinfo, None).unwrap()
+                })
+                .collect()
+        };
 
         self.renderpass = {
             let renderpass_attachments = [
@@ -709,7 +708,7 @@ impl<'a> App<'a> {
             vk::BufferUsageFlags::INDEX_BUFFER,
             &vk_base.device_memory_properties,
         );
-        self.index_buffer.copy_data(&self.mesh.indices);
+        self.index_buffer.copy_data(0, &self.mesh.indices);
 
         self.vertex_buffer = Buffer::new(
             &vk_base.device,
@@ -717,7 +716,7 @@ impl<'a> App<'a> {
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &vk_base.device_memory_properties,
         );
-        self.vertex_buffer.copy_data(&self.mesh.vertices);
+        self.vertex_buffer.copy_data(0, &self.mesh.vertices);
 
         self.camera = Camera::new(
             Vec3::new(0.0, 0.0, 1.0),
@@ -725,9 +724,11 @@ impl<'a> App<'a> {
             1.0,
         );
 
-        self.transform_buffer = Buffer::new(
+        let camera_transform_size = size_of::<Mat4>() * 2;
+        let frame_buffer_size = camera_transform_size * MAX_FRAMES_IN_FLIGHT;
+        self.frame_data_buffer = Buffer::new(
             &vk_base.device,
-            (size_of::<Mat4>() * 2 * vk_base.max_frames_in_flight) as u64,
+            frame_buffer_size as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             &vk_base.device_memory_properties,
         );
@@ -771,7 +772,7 @@ impl<'a> App<'a> {
         self.desc_set_layout_bindings = {
             let layout_binding = vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::VERTEX);
             vec![layout_binding]
@@ -791,13 +792,13 @@ impl<'a> App<'a> {
 
         self.desc_pool = {
             let pool_sizes = [vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: vk_base.max_frames_in_flight as u32,
+                ty: vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC,
+                descriptor_count: 10,
             }];
 
             let pool_createinfo = vk::DescriptorPoolCreateInfo::default()
                 .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-                .max_sets(vk_base.max_frames_in_flight as u32)
+                .max_sets(4 as u32)
                 .pool_sizes(&pool_sizes);
 
             unsafe {
@@ -821,18 +822,15 @@ impl<'a> App<'a> {
             }
         };
 
-        self.desc_buf_infos = (0..vk_base.max_frames_in_flight)
-            .into_iter()
-            .map(|_| {
-                vk::DescriptorBufferInfo::default()
-                    .buffer(self.transform_buffer.buf)
-                    .offset(0)
-                    .range((size_of::<Mat4>() * 2) as u64)
-            })
-            .collect();
+        self.desc_buf_infos = vec![
+            vk::DescriptorBufferInfo::default()
+                .buffer(self.frame_data_buffer.buf)
+                .offset(0)
+                .range(camera_transform_size as u64),
+        ];
 
         let desc_write = vk::WriteDescriptorSet::default()
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
             .dst_set(self.desc_sets[0])
             .dst_binding(0)
             .dst_array_element(0)
@@ -999,11 +997,21 @@ impl<'a> App<'a> {
                 .destroy_shader_module(self.fragment_shader_module, None);
             self.index_buffer.destroy(&vk_base.device);
             self.vertex_buffer.destroy(&vk_base.device);
-            self.transform_buffer.destroy(&vk_base.device);
+            self.frame_data_buffer.destroy(&vk_base.device);
             for framebuffer in &self.framebuffers {
                 vk_base.device.destroy_framebuffer(*framebuffer, None);
             }
+            vk_base.device.destroy_descriptor_pool(self.desc_pool, None);
             vk_base.device.destroy_render_pass(self.renderpass, None);
+            for sema in &self.present_complete_semaphores {
+                vk_base.device.destroy_semaphore(*sema, None);
+            }
+            for sema in &self.render_complete_semaphores {
+                vk_base.device.destroy_semaphore(*sema, None);
+            }
+            for fence in &self.frame_fences {
+                vk_base.device.destroy_fence(*fence, None);
+            }
         }
     }
 
@@ -1043,11 +1051,31 @@ impl<'a> App<'a> {
             return;
         };
 
-        let in_flight_frame_index = self.frame_count % vk_base.max_frames_in_flight;
-        let present_complete_semaphore =
-            vk_base.present_complete_semaphores[in_flight_frame_index as usize];
-        let render_complete_semaphore =
-            vk_base.render_complete_semaphores[in_flight_frame_index as usize];
+        let in_flight_frame_index = self.frame_count % MAX_FRAMES_IN_FLIGHT;
+        let present_complete_semaphore = self.present_complete_semaphores[in_flight_frame_index];
+        let render_complete_semaphore = self.render_complete_semaphores[in_flight_frame_index];
+        let frame_fence = self.frame_fences[in_flight_frame_index];
+        let cmd_buf = self.draw_cmd_bufs[in_flight_frame_index];
+
+        unsafe {
+            vk_base
+                .device
+                .wait_for_fences(&[frame_fence], true, u64::MAX)
+                .unwrap();
+            vk_base.device.reset_fences(&[frame_fence]).unwrap();
+        }
+
+        let image_extent = vk_base.swapchain.image_extent();
+        let view_matrix = self.camera.view_matrix();
+        let pers_matrix = self
+            .camera
+            .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
+        let mvp = [view_matrix, pers_matrix];
+
+        let frame_data_size = size_of::<Mat4>() * 2;
+        let frame_buffer_offset = in_flight_frame_index * frame_data_size;
+        self.frame_data_buffer
+            .copy_data(frame_buffer_offset as u64, &mvp);
 
         let present_index = vk_base
             .swapchain
@@ -1073,74 +1101,88 @@ impl<'a> App<'a> {
             .render_area(vk_base.swapchain.image_extent().into())
             .clear_values(&clear_values);
 
-        let image_extent = vk_base.swapchain.image_extent();
-        let view_matrix = self.camera.view_matrix();
-        let pers_matrix = self
-            .camera
-            .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
-        let mvp = [view_matrix, pers_matrix];
-        // TODO: We definitely need to protect this write over different frames.
-        //       Or maybe we need to copy mvp into different parts of the buffer for
-        //       different frames?
-        self.transform_buffer.copy_data(&mvp);
+        unsafe {
+            vk_base
+                .device
+                .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::RELEASE_RESOURCES)
+                .unwrap();
 
-        let frame_fence = vk_base.frame_fences[in_flight_frame_index];
-        vk_base.record_submit_cmd_buf(
-            vk_base.cmd_buf_draw,
-            vk::Fence::null(),
-            vk_base.present_queue,
-            &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            &[present_complete_semaphore],
-            &[render_complete_semaphore],
-            |device, cmd_buf_draw| unsafe {
-                device.cmd_begin_render_pass(
-                    cmd_buf_draw,
-                    &render_pass_begin_info,
-                    vk::SubpassContents::INLINE,
-                );
+            let cmd_buf_begin_info = vk::CommandBufferBeginInfo::default()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-                device.cmd_bind_pipeline(
-                    cmd_buf_draw,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.graphics_pipelines[0],
-                );
+            vk_base
+                .device
+                .begin_command_buffer(cmd_buf, &cmd_buf_begin_info)
+                .expect("Failed to begin command buffer recording.");
 
-                let image_extent = vk_base.swapchain.image_extent();
-                let viewport = vk::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: image_extent.width as f32,
-                    height: image_extent.height as f32,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                };
-                let scissor: vk::Rect2D = image_extent.into();
-                device.cmd_set_viewport(cmd_buf_draw, 0, &[viewport]);
-                device.cmd_set_scissor(cmd_buf_draw, 0, &[scissor]);
+            vk_base.device.cmd_begin_render_pass(
+                cmd_buf,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
 
-                device.cmd_bind_vertex_buffers(cmd_buf_draw, 0, &[self.vertex_buffer.buf], &[0]);
+            vk_base.device.cmd_bind_pipeline(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.graphics_pipelines[0],
+            );
 
-                device.cmd_bind_descriptor_sets(
-                    cmd_buf_draw,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline_layout,
-                    0,
-                    &self.desc_sets,
-                    &[],
-                );
+            let image_extent = vk_base.swapchain.image_extent();
+            let viewport = vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: image_extent.width as f32,
+                height: image_extent.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            };
+            let scissor: vk::Rect2D = image_extent.into();
+            vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
+            vk_base.device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
-                device.cmd_bind_index_buffer(
-                    cmd_buf_draw,
-                    self.index_buffer.buf,
-                    0,
-                    vk::IndexType::UINT32,
-                );
+            vk_base
+                .device
+                .cmd_bind_vertex_buffers(cmd_buf, 0, &[self.vertex_buffer.buf], &[0]);
 
-                device.cmd_draw_indexed(cmd_buf_draw, self.mesh.indices.len() as u32, 1, 0, 0, 1);
+            let camera_transform_size = size_of::<Mat4>() * 2;
+            vk_base.device.cmd_bind_descriptor_sets(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &self.desc_sets,
+                &[(in_flight_frame_index * camera_transform_size) as u32],
+            );
 
-                device.cmd_end_render_pass(cmd_buf_draw);
-            },
-        );
+            vk_base.device.cmd_bind_index_buffer(
+                cmd_buf,
+                self.index_buffer.buf,
+                0,
+                vk::IndexType::UINT32,
+            );
+
+            vk_base
+                .device
+                .cmd_draw_indexed(cmd_buf, self.mesh.indices.len() as u32, 1, 0, 0, 1);
+
+            vk_base.device.cmd_end_render_pass(cmd_buf);
+
+            vk_base
+                .device
+                .end_command_buffer(cmd_buf)
+                .expect("Failed to end command buffer recording.");
+
+            let submit_info = vk::SubmitInfo::default()
+                .wait_semaphores(std::slice::from_ref(&present_complete_semaphore))
+                .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+                .command_buffers(std::slice::from_ref(&cmd_buf))
+                .signal_semaphores(std::slice::from_ref(&render_complete_semaphore));
+
+            vk_base
+                .device
+                .queue_submit(vk_base.present_queue, &[submit_info], frame_fence)
+                .expect("Failed to queue submit.");
+        };
 
         vk_base.swapchain.queue_present(
             vk_base.present_queue,
@@ -1148,24 +1190,9 @@ impl<'a> App<'a> {
             present_index,
         );
 
-        /*
-        if frame_count >= vk_base.max_frames_in_flight {
-            let wait_index = (frame_count + 1) % vk_base.max_frames_in_flight;
-            let wait_fence = vk_base.frame_fences[wait_index];
-
-            unsafe {
-                vk_base
-                    .device
-                    .wait_for_fences(&[wait_fence], true, u64::MAX)
-                    .unwrap();
-                vk_base.device.reset_fences(&[wait_fence]).unwrap();
-            }
-        }
-        */
-
-        unsafe {
-            vk_base.device.device_wait_idle().unwrap();
-        }
+        // unsafe {
+        //     vk_base.device.device_wait_idle().unwrap();
+        // }
 
         assert!(self.frame_count < usize::MAX);
         self.frame_count += 1;
