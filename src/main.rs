@@ -550,7 +550,7 @@ struct App<'a> {
 
     frame_data_buffer: Buffer,
     frame_fences: Vec<vk::Fence>,
-    present_complete_semaphores: Vec<vk::Semaphore>,
+    present_acquired_semaphores: Vec<vk::Semaphore>,
     render_complete_semaphores: Vec<vk::Semaphore>,
     draw_cmd_bufs: Vec<vk::CommandBuffer>,
 
@@ -603,7 +603,7 @@ impl<'a> App<'a> {
                 .collect()
         };
 
-        self.present_complete_semaphores = unsafe {
+        self.present_acquired_semaphores = unsafe {
             (0..MAX_FRAMES_IN_FLIGHT)
                 .into_iter()
                 .map(|_| {
@@ -1006,7 +1006,7 @@ impl<'a> App<'a> {
             }
             vk_base.device.destroy_descriptor_pool(self.desc_pool, None);
             vk_base.device.destroy_render_pass(self.renderpass, None);
-            for sema in &self.present_complete_semaphores {
+            for sema in &self.present_acquired_semaphores {
                 vk_base.device.destroy_semaphore(*sema, None);
             }
             for sema in &self.render_complete_semaphores {
@@ -1055,7 +1055,7 @@ impl<'a> App<'a> {
         };
 
         let in_flight_frame_index = self.frame_count % MAX_FRAMES_IN_FLIGHT;
-        let present_complete_semaphore = self.present_complete_semaphores[in_flight_frame_index];
+        let present_acquired_semaphore = self.present_acquired_semaphores[in_flight_frame_index];
         let frame_fence = self.frame_fences[in_flight_frame_index];
         let cmd_buf = self.draw_cmd_bufs[in_flight_frame_index];
 
@@ -1081,7 +1081,7 @@ impl<'a> App<'a> {
 
         let present_index = vk_base
             .swapchain
-            .acquire_next_image(present_complete_semaphore);
+            .acquire_next_image(present_acquired_semaphore);
 
         let render_complete_semaphore = self.render_complete_semaphores[present_index as usize];
 
@@ -1177,7 +1177,7 @@ impl<'a> App<'a> {
                 .expect("Failed to end command buffer recording.");
 
             let submit_info = vk::SubmitInfo::default()
-                .wait_semaphores(std::slice::from_ref(&present_complete_semaphore))
+                .wait_semaphores(std::slice::from_ref(&present_acquired_semaphore))
                 .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
                 .command_buffers(std::slice::from_ref(&cmd_buf))
                 .signal_semaphores(std::slice::from_ref(&render_complete_semaphore));
