@@ -1056,7 +1056,6 @@ impl<'a> App<'a> {
 
         let in_flight_frame_index = self.frame_count % MAX_FRAMES_IN_FLIGHT;
         let present_complete_semaphore = self.present_complete_semaphores[in_flight_frame_index];
-        let render_complete_semaphore = self.render_complete_semaphores[in_flight_frame_index];
         let frame_fence = self.frame_fences[in_flight_frame_index];
         let cmd_buf = self.draw_cmd_bufs[in_flight_frame_index];
 
@@ -1083,6 +1082,8 @@ impl<'a> App<'a> {
         let present_index = vk_base
             .swapchain
             .acquire_next_image(present_complete_semaphore);
+
+        let render_complete_semaphore = self.render_complete_semaphores[present_index as usize];
 
         let clear_values = [
             vk::ClearValue {
