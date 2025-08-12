@@ -738,8 +738,9 @@ impl<'a> App<'a> {
 
         self.vertex_shader_module = unsafe {
             let vertex_spv = {
-                let mut file =
-                    Cursor::new(&include_bytes!("../shader/triangle/triangle.vert.spv")[..]);
+                let mut file = Cursor::new(
+                    &include_bytes!("../target/shaders/triangle/triangle.vert.spv")[..],
+                );
                 read_spv(&mut file).expect("Failed to read vertex shader spv file.")
             };
             let vertex_shader_info = vk::ShaderModuleCreateInfo::default().code(&vertex_spv);
@@ -750,8 +751,9 @@ impl<'a> App<'a> {
         };
         self.fragment_shader_module = unsafe {
             let frag_spv = {
-                let mut file =
-                    Cursor::new(&include_bytes!("../shader/triangle/triangle.frag.spv")[..]);
+                let mut file = Cursor::new(
+                    &include_bytes!("../target/shaders/triangle/triangle.frag.spv")[..],
+                );
                 read_spv(&mut file).expect("Failed to read fragment shader spv file.")
             };
             let frag_shader_info = vk::ShaderModuleCreateInfo::default().code(&frag_spv);
