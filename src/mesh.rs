@@ -36,7 +36,7 @@ impl Mesh {
                     1.0,
                 ]
             } else {
-                [0.0; 4]
+                [186.0 / 255.0, 193.0 / 255.0, 196.0 / 255.0, 1.0]
             };
             let normal = if mesh.normals.len() > 0 {
                 [

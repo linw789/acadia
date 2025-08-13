@@ -1,4 +1,3 @@
-use crate::common::Vertex;
 use crate::util::find_memorytype_index;
 use ::ash::{Device, util::Align, vk};
 use std::{ffi::c_void, marker::Copy};

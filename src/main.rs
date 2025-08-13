@@ -2,17 +2,12 @@ mod buffer;
 mod camera;
 mod common;
 mod image;
+mod light;
 mod mesh;
 mod swapchain;
 mod util;
 
-use ::ash::{
-    Device, Entry, Instance,
-    ext::debug_utils,
-    khr,
-    util::{Align, read_spv},
-    vk,
-};
+use ::ash::{Device, Entry, Instance, ext::debug_utils, khr, util::read_spv, vk};
 use ::winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
@@ -23,8 +18,9 @@ use ::winit::{
 use buffer::Buffer;
 use camera::Camera;
 use common::Vertex;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4};
 use image::Image;
+use light::DirectionalLight;
 use mesh::Mesh;
 use std::{
     borrow::Cow, error::Error, f32::consts::PI, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec,
@@ -561,6 +557,7 @@ struct App<'a> {
     frame_count: usize,
 
     pub camera: Camera,
+    pub light: DirectionalLight,
 
     pub is_left_button_pressed: bool,
 }
@@ -726,11 +723,15 @@ impl<'a> App<'a> {
         self.camera = Camera::new(
             Vec3::new(0.0, 0.0, 1.0),
             40.0 / 180.0 * std::f32::consts::PI,
-            0.5,
+            0.1,
         );
 
-        let camera_transform_size = size_of::<Mat4>() * 2;
-        let frame_buffer_size = camera_transform_size * MAX_FRAMES_IN_FLIGHT;
+        self.light = DirectionalLight::new(Vec3::new(0.0, 0.0, -1.0));
+
+        let camera_transform_size = size_of::<Mat4>();
+        let light_data_size = size_of::<Vec4>();
+        let frame_data_size = 96; // camera_transform_size + light_data_size;
+        let frame_buffer_size = frame_data_size * MAX_FRAMES_IN_FLIGHT;
         self.frame_data_buffer = Buffer::new(
             &vk_base.device,
             frame_buffer_size as u64,
@@ -833,7 +834,7 @@ impl<'a> App<'a> {
             vk::DescriptorBufferInfo::default()
                 .buffer(self.frame_data_buffer.buf)
                 .offset(0)
-                .range(camera_transform_size as u64),
+                .range(frame_data_size as u64),
         ];
 
         let desc_write = vk::WriteDescriptorSet::default()
@@ -866,7 +867,6 @@ impl<'a> App<'a> {
                     ..Default::default()
                 },
                 vk::PipelineShaderStageCreateInfo {
-                    s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                     module: self.fragment_shader_module,
                     p_name: shader_entry_name.as_ptr(),
                     stage: vk::ShaderStageFlags::FRAGMENT,
@@ -892,6 +892,12 @@ impl<'a> App<'a> {
                     binding: 0,
                     format: vk::Format::R32G32B32A32_SFLOAT,
                     offset: offset_of!(Vertex, color) as u32,
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 2,
+                    binding: 0,
+                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    offset: offset_of!(Vertex, normal) as u32,
                 },
             ];
 
@@ -1076,12 +1082,20 @@ impl<'a> App<'a> {
         let pers_matrix = self
             .camera
             .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
-        let mvp = [view_matrix, pers_matrix];
+        let vp_matrix = [pers_matrix * view_matrix];
 
-        let frame_data_size = size_of::<Mat4>() * 2;
-        let frame_buffer_offset = in_flight_frame_index * frame_data_size;
+        let camera_transform_size = size_of::<Mat4>();
+        let light_data_size = size_of::<Vec4>();
+        let frame_data_size = 96; // camera_transform_size + light_data_size;
+        let frame_data_offset = in_flight_frame_index * frame_data_size;
         self.frame_data_buffer
-            .copy_data(frame_buffer_offset as u64, &mvp);
+            .copy_data(frame_data_offset as u64, &vp_matrix);
+
+        let light_data = [Vec4::from((self.light.direction, 1.0))];
+        self.frame_data_buffer.copy_data(
+            (frame_data_offset + camera_transform_size) as u64,
+            &light_data,
+        );
 
         let present_index = vk_base
             .swapchain
@@ -1148,14 +1162,16 @@ impl<'a> App<'a> {
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
             vk_base.device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
-            let camera_transform_size = size_of::<Mat4>() * 2;
+            let camera_transform_size = size_of::<Mat4>();
+            let light_data_size = size_of::<Vec4>();
+            let frame_data_size = 96; // camera_transform_size + light_data_size;
             vk_base.device.cmd_bind_descriptor_sets(
                 cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
                 &self.desc_sets,
-                &[(in_flight_frame_index * camera_transform_size) as u32],
+                &[(in_flight_frame_index * frame_data_size) as u32],
             );
 
             vk_base
@@ -1233,18 +1249,26 @@ impl<'a> ApplicationHandler for App<'a> {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowLeft)
                         | PhysicalKey::Code(KeyCode::KeyA) => {
-                            self.camera.translate_local(Vec3::new(-0.01, 0.0, 0.0));
+                            self.camera
+                                .transform
+                                .translate_local(Vec3::new(-0.01, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowRight)
                         | PhysicalKey::Code(KeyCode::KeyD) => {
-                            self.camera.translate_local(Vec3::new(0.01, 0.0, 0.0));
+                            self.camera
+                                .transform
+                                .translate_local(Vec3::new(0.01, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-                            self.camera.translate_local(Vec3::new(0.0, 0.0, -0.01));
+                            self.camera
+                                .transform
+                                .translate_local(Vec3::new(0.0, 0.0, -0.01));
                         }
                         PhysicalKey::Code(KeyCode::ArrowDown)
                         | PhysicalKey::Code(KeyCode::KeyS) => {
-                            self.camera.translate_local(Vec3::new(0.0, 0.0, 0.01));
+                            self.camera
+                                .transform
+                                .translate_local(Vec3::new(0.0, 0.0, 0.01));
                         }
                         _ => {}
                     }
@@ -1297,9 +1321,9 @@ impl<'a> ApplicationHandler for App<'a> {
                     let ry = scale * (delta.0 as f32) / 180.0 * PI;
                     let rx = scale * (delta.1 as f32) / 180.0 * PI;
 
-                    self.camera.rotate_y(-ry);
+                    self.camera.transform.rotate_y(-ry);
                     // TODO: disable rotation bigger than 180 degree around x-axis.
-                    self.camera.rotate_x(-rx);
+                    self.camera.transform.rotate_x(-rx);
                 }
             }
             _ => (),
