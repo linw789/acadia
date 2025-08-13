@@ -1,4 +1,4 @@
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 
 pub struct Camera {
@@ -19,13 +19,37 @@ impl Camera {
         }
     }
 
+    /// Translate in the world space.
     pub fn translate(&mut self, t: Vec3) {
         self.position += t;
+    }
+
+    /// Translate in the local space. The three components of `t` represents translation along the
+    /// local x-axis, y-axis and z-axis respectively.
+    pub fn translate_local(&mut self, t: Vec3) {
+        let rotation_matrix = Mat3::from_quat(self.orientation);
+        self.position += t.x * rotation_matrix.x_axis;
+        self.position += t.y * rotation_matrix.y_axis;
+        self.position += t.z * rotation_matrix.z_axis;
+    }
+
+    /// Rotate around the local x-axis. `angle` is the rotating angle in radian.
+    pub fn rotate_x(&mut self, angle: f32) {
+        let r = Quat::from_rotation_x(angle);
+        self.orientation = r * self.orientation;
+        self.orientation = self.orientation.normalize();
     }
 
     /// Rotate around the local y-axis. `angle` is the rotating angle in radian.
     pub fn rotate_y(&mut self, angle: f32) {
         let r = Quat::from_rotation_y(angle);
+        self.orientation = r * self.orientation;
+        self.orientation = self.orientation.normalize();
+    }
+
+    /// Rotate around the local z-axis. `angle` is the rotating angle in radian.
+    pub fn rotate_z(&mut self, angle: f32) {
+        let r = Quat::from_rotation_z(angle);
         self.orientation = r * self.orientation;
         self.orientation = self.orientation.normalize();
     }

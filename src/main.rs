@@ -15,7 +15,7 @@ use ::ash::{
 };
 use ::winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
@@ -561,6 +561,8 @@ struct App<'a> {
     frame_count: usize,
 
     pub camera: Camera,
+
+    pub is_left_button_pressed: bool,
 }
 
 impl<'a> App<'a> {
@@ -1231,20 +1233,28 @@ impl<'a> ApplicationHandler for App<'a> {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowLeft)
                         | PhysicalKey::Code(KeyCode::KeyA) => {
-                            self.camera.rotate_y(1.0 / 180.0 * PI)
+                            self.camera.translate_local(Vec3::new(-0.01, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowRight)
                         | PhysicalKey::Code(KeyCode::KeyD) => {
-                            self.camera.rotate_y(-1.0 / 180.0 * PI)
+                            self.camera.translate_local(Vec3::new(0.01, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-                            self.camera.translate(Vec3::new(0.0, 0.0, -0.01))
+                            self.camera.translate_local(Vec3::new(0.0, 0.0, -0.01));
                         }
                         PhysicalKey::Code(KeyCode::ArrowDown)
                         | PhysicalKey::Code(KeyCode::KeyS) => {
-                            self.camera.translate(Vec3::new(0.0, 0.0, 0.01))
+                            self.camera.translate_local(Vec3::new(0.0, 0.0, 0.01));
                         }
                         _ => {}
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Left {
+                    match state {
+                        ElementState::Pressed => self.is_left_button_pressed = true,
+                        ElementState::Released => self.is_left_button_pressed = false,
                     }
                 }
             }
@@ -1268,6 +1278,28 @@ impl<'a> ApplicationHandler for App<'a> {
                     if recreated {
                         self.update_framebuffers();
                     }
+                }
+            }
+            _ => (),
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        match event {
+            DeviceEvent::MouseMotion { delta } => {
+                if self.is_left_button_pressed {
+                    let scale = 0.2;
+                    let ry = scale * (delta.0 as f32) / 180.0 * PI;
+                    let rx = scale * (delta.1 as f32) / 180.0 * PI;
+
+                    self.camera.rotate_y(-ry);
+                    // TODO: disable rotation bigger than 180 degree around x-axis.
+                    self.camera.rotate_x(-rx);
                 }
             }
             _ => (),
