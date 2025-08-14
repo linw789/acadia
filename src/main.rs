@@ -139,11 +139,8 @@ struct VkBase {
     present_image_views: Vec<vk::ImageView>,
 
     pub cmd_pool: vk::CommandPool,
-    pub cmd_buf_setup: vk::CommandBuffer,
 
     depth_image: Image,
-
-    pub fence_setup_cmd_reuse: vk::Fence,
 }
 
 impl VkBase {
@@ -315,29 +312,11 @@ impl VkBase {
             device.create_command_pool(&pool_createinfo, None).unwrap()
         };
 
-        let cmd_buf_setup = unsafe {
-            let cmd_buf_allocateinfo = vk::CommandBufferAllocateInfo::default()
-                .command_buffer_count(1)
-                .command_pool(cmd_pool)
-                .level(vk::CommandBufferLevel::PRIMARY);
-            let cmd_bufs = device
-                .allocate_command_buffers(&cmd_buf_allocateinfo)
-                .unwrap();
-            cmd_bufs[0]
-        };
-
         let device_memory_properties =
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
         let depth_image =
             Image::new_depth_image(&device, device_memory_properties, swapchain.image_extent());
-
-        let fence_setup_cmd_reuse = unsafe {
-            let create_info = vk::FenceCreateInfo::default();
-            device
-                .create_fence(&create_info, None)
-                .expect("Failed to create fence.")
-        };
 
         Ok(Self {
             inst,
@@ -359,69 +338,9 @@ impl VkBase {
             present_image_views,
 
             cmd_pool,
-            cmd_buf_setup,
 
             depth_image,
-
-            fence_setup_cmd_reuse,
         })
-    }
-
-    pub fn setup(&self) {
-        unsafe {
-            self.device
-                .reset_command_buffer(
-                    self.cmd_buf_setup,
-                    vk::CommandBufferResetFlags::RELEASE_RESOURCES,
-                )
-                .expect("Failed to reset command buffer.");
-
-            let cmd_buf_begin_info = vk::CommandBufferBeginInfo::default()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-            self.device
-                .begin_command_buffer(self.cmd_buf_setup, &cmd_buf_begin_info)
-                .expect("Failed to begin command buffer recording.");
-
-            let layout_transition_barriers = vk::ImageMemoryBarrier::default()
-                .image(self.depth_image.image)
-                .dst_access_mask(
-                    vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
-                        | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                )
-                .new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                .old_layout(vk::ImageLayout::UNDEFINED)
-                .subresource_range(
-                    vk::ImageSubresourceRange::default()
-                        .aspect_mask(vk::ImageAspectFlags::DEPTH)
-                        .layer_count(1)
-                        .level_count(1),
-                );
-
-            self.device.cmd_pipeline_barrier(
-                self.cmd_buf_setup,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[layout_transition_barriers],
-            );
-
-            self.device
-                .end_command_buffer(self.cmd_buf_setup)
-                .expect("Failed to end command buffer recording.");
-
-            let submit_info = vk::SubmitInfo::default()
-                .wait_semaphores(&[])
-                .wait_dst_stage_mask(&[])
-                .command_buffers(std::slice::from_ref(&self.cmd_buf_setup))
-                .signal_semaphores(&[]);
-
-            self.device
-                .queue_submit(self.present_queue, &[submit_info], vk::Fence::null())
-                .expect("Failed to queue submit.");
-        }
     }
 
     pub fn recreate_swapchain(&mut self, image_extent: vk::Extent2D) -> bool {
@@ -481,7 +400,6 @@ impl VkBase {
 impl Drop for VkBase {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_fence(self.fence_setup_cmd_reuse, None);
             self.depth_image.destroy(&self.device);
             for view in &self.present_image_views {
                 self.device.destroy_image_view(*view, None);
@@ -542,7 +460,6 @@ struct App<'a> {
 impl<'a> App<'a> {
     fn init_vk(&mut self) {
         self.vk_base = VkBase::new(self.window.as_ref().unwrap()).ok();
-        // self.vk_base.as_ref().unwrap().setup();
     }
 
     fn destroy_vk(&mut self) {
@@ -1223,30 +1140,23 @@ impl<'a> ApplicationHandler for App<'a> {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
+                let scale = 0.01;
                 if event.state.is_pressed() {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowLeft)
                         | PhysicalKey::Code(KeyCode::KeyA) => {
-                            self.camera
-                                .transform
-                                .translate_local(Vec3::new(-0.01, 0.0, 0.0));
+                            self.camera.translate_local(Vec3::new(-scale, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowRight)
                         | PhysicalKey::Code(KeyCode::KeyD) => {
-                            self.camera
-                                .transform
-                                .translate_local(Vec3::new(0.01, 0.0, 0.0));
+                            self.camera.translate_local(Vec3::new(scale, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-                            self.camera
-                                .transform
-                                .translate_local(Vec3::new(0.0, 0.0, -0.01));
+                            self.camera.translate_local(Vec3::new(0.0, 0.0, -scale));
                         }
                         PhysicalKey::Code(KeyCode::ArrowDown)
                         | PhysicalKey::Code(KeyCode::KeyS) => {
-                            self.camera
-                                .transform
-                                .translate_local(Vec3::new(0.0, 0.0, 0.01));
+                            self.camera.translate_local(Vec3::new(0.0, 0.0, scale));
                         }
                         _ => {}
                     }
@@ -1299,9 +1209,8 @@ impl<'a> ApplicationHandler for App<'a> {
                     let ry = scale * (delta.0 as f32) / 180.0 * PI;
                     let rx = scale * (delta.1 as f32) / 180.0 * PI;
 
-                    self.camera.transform.rotate_y(-ry);
-                    // TODO: disable rotation bigger than 180 degree around x-axis.
-                    self.camera.transform.rotate_x(-rx);
+                    self.camera.rotate_world_y(-ry);
+                    self.camera.rotate_local_x(-rx);
                 }
             }
             _ => (),

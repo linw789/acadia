@@ -27,7 +27,7 @@ impl Transform {
     }
 
     /// Rotate around the local x-axis. `angle` is the rotating angle in radian.
-    pub fn rotate_x(&mut self, angle: f32) {
+    pub fn rotate_local_x(&mut self, angle: f32) {
         let rotation_matrix = Mat3::from_quat(self.orientation);
         let r = Quat::from_axis_angle(rotation_matrix.x_axis, angle);
         self.orientation = r * self.orientation;
@@ -35,7 +35,7 @@ impl Transform {
     }
 
     /// Rotate around the local y-axis. `angle` is the rotating angle in radian.
-    pub fn rotate_y(&mut self, angle: f32) {
+    pub fn rotate_local_y(&mut self, angle: f32) {
         let rotation_matrix = Mat3::from_quat(self.orientation);
         let r = Quat::from_axis_angle(rotation_matrix.y_axis, angle);
         self.orientation = r * self.orientation;
@@ -43,7 +43,7 @@ impl Transform {
     }
 
     /// Rotate around the local z-axis. `angle` is the rotating angle in radian.
-    pub fn rotate_z(&mut self, angle: f32) {
+    pub fn rotate_local_z(&mut self, angle: f32) {
         let rotation_matrix = Mat3::from_quat(self.orientation);
         let r = Quat::from_axis_angle(rotation_matrix.z_axis, angle);
         self.orientation = r * self.orientation;
