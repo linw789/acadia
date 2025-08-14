@@ -984,13 +984,11 @@ impl<'a> App<'a> {
         let frame_data_size = 96; // camera_transform_size + light_data_size;
         let frame_data_offset = in_flight_frame_index * frame_data_size;
         self.frame_data_buffer
-            .copy_data(frame_data_offset as u64, &vp_matrix);
+            .copy_data(frame_data_offset, &vp_matrix);
 
         let light_data = [Vec4::from((self.light.direction, 1.0))];
-        self.frame_data_buffer.copy_data(
-            (frame_data_offset + camera_transform_size) as u64,
-            &light_data,
-        );
+        self.frame_data_buffer
+            .copy_data(frame_data_offset + camera_transform_size, &light_data);
 
         let present_index = vk_base
             .swapchain

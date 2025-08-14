@@ -70,11 +70,10 @@ impl Buffer {
     }
 
     /// Copy data from system memory to GPU memory.
-    pub fn copy_data<T: Copy>(&self, offset: u64, data: &[T]) {
-        let end = offset + (data.len() as u64);
-        assert!(self.size >= end);
+    pub fn copy_data<T: Copy>(&self, offset: usize, data: &[T]) {
+        assert!(self.size >= (offset + data.len()) as u64);
         let mut data_align = unsafe {
-            let offset_ptr = (self.ptr as *mut u8).add(offset as usize) as *mut c_void;
+            let offset_ptr = (self.ptr as *mut u8).add(offset) as *mut c_void;
             Align::new(offset_ptr, align_of::<T>() as u64, self.size)
         };
         data_align.copy_from_slice(data);
