@@ -270,7 +270,6 @@ impl VkBase {
                 .unwrap()
         };
         let surface_format = pick_present_image_format(&surface_formats);
-        println!("[DEBUG LINW] picked surface format: {:?}", surface_format);
 
         let surface_capabilities = unsafe {
             surface_loader
@@ -330,8 +329,8 @@ impl VkBase {
         let device_memory_properties =
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
-        let depth_image = Image::default();
-        // Image::new_depth_image(&device, device_memory_properties, swapchain.image_extent());
+        let depth_image =
+            Image::new_depth_image(&device, device_memory_properties, swapchain.image_extent());
 
         let fence_setup_cmd_reuse = unsafe {
             let create_info = vk::FenceCreateInfo::default();
@@ -368,83 +367,61 @@ impl VkBase {
         })
     }
 
-    pub fn record_submit_cmd_buf<F: FnOnce(&Device, vk::CommandBuffer)>(
-        &self,
-        cmd_buf: vk::CommandBuffer,
-        frame_fence: vk::Fence,
-        submit_queue: vk::Queue,
-        wait_mask: &[vk::PipelineStageFlags],
-        wait_semaphores: &[vk::Semaphore],
-        signal_semaphores: &[vk::Semaphore],
-        record_cmd_buf_f: F,
-    ) {
+    pub fn setup(&self) {
         unsafe {
             self.device
-                .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::RELEASE_RESOURCES)
+                .reset_command_buffer(
+                    self.cmd_buf_setup,
+                    vk::CommandBufferResetFlags::RELEASE_RESOURCES,
+                )
                 .expect("Failed to reset command buffer.");
 
             let cmd_buf_begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
             self.device
-                .begin_command_buffer(cmd_buf, &cmd_buf_begin_info)
+                .begin_command_buffer(self.cmd_buf_setup, &cmd_buf_begin_info)
                 .expect("Failed to begin command buffer recording.");
 
-            record_cmd_buf_f(&self.device, cmd_buf);
+            let layout_transition_barriers = vk::ImageMemoryBarrier::default()
+                .image(self.depth_image.image)
+                .dst_access_mask(
+                    vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                        | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                )
+                .new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(vk::ImageAspectFlags::DEPTH)
+                        .layer_count(1)
+                        .level_count(1),
+                );
+
+            self.device.cmd_pipeline_barrier(
+                self.cmd_buf_setup,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[layout_transition_barriers],
+            );
 
             self.device
-                .end_command_buffer(cmd_buf)
+                .end_command_buffer(self.cmd_buf_setup)
                 .expect("Failed to end command buffer recording.");
 
             let submit_info = vk::SubmitInfo::default()
-                .wait_semaphores(wait_semaphores)
-                .wait_dst_stage_mask(wait_mask)
-                .command_buffers(std::slice::from_ref(&cmd_buf))
-                .signal_semaphores(signal_semaphores);
+                .wait_semaphores(&[])
+                .wait_dst_stage_mask(&[])
+                .command_buffers(std::slice::from_ref(&self.cmd_buf_setup))
+                .signal_semaphores(&[]);
 
             self.device
-                .queue_submit(submit_queue, &[submit_info], frame_fence)
+                .queue_submit(self.present_queue, &[submit_info], vk::Fence::null())
                 .expect("Failed to queue submit.");
         }
-    }
-
-    pub fn setup(&self) {
-        self.record_submit_cmd_buf(
-            self.cmd_buf_setup,
-            self.fence_setup_cmd_reuse,
-            self.present_queue,
-            &[],
-            &[],
-            &[],
-            |device, cmd_buf_setup| {
-                let layout_transition_barriers = vk::ImageMemoryBarrier::default()
-                    .image(self.depth_image.image)
-                    .dst_access_mask(
-                        vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
-                            | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    )
-                    .new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                    .old_layout(vk::ImageLayout::UNDEFINED)
-                    .subresource_range(
-                        vk::ImageSubresourceRange::default()
-                            .aspect_mask(vk::ImageAspectFlags::DEPTH)
-                            .layer_count(1)
-                            .level_count(1),
-                    );
-
-                unsafe {
-                    device.cmd_pipeline_barrier(
-                        cmd_buf_setup,
-                        vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                        vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                        vk::DependencyFlags::empty(),
-                        &[],
-                        &[],
-                        &[layout_transition_barriers],
-                    );
-                }
-            },
-        );
     }
 
     pub fn recreate_swapchain(&mut self, image_extent: vk::Extent2D) -> bool {
@@ -465,7 +442,7 @@ impl VkBase {
 
         if recreated {
             self.update_present_image_views();
-            // self.update_depth_image();
+            self.update_depth_image();
         }
 
         recreated
@@ -632,14 +609,14 @@ impl<'a> App<'a> {
                     final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
                     ..Default::default()
                 },
-                // vk::AttachmentDescription {
-                //     format: vk::Format::D16_UNORM,
-                //     samples: vk::SampleCountFlags::TYPE_1,
-                //     load_op: vk::AttachmentLoadOp::CLEAR,
-                //     initial_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                //     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                //     ..Default::default()
-                // },
+                vk::AttachmentDescription {
+                    format: vk::Format::D16_UNORM,
+                    samples: vk::SampleCountFlags::TYPE_1,
+                    load_op: vk::AttachmentLoadOp::CLEAR,
+                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    ..Default::default()
+                },
             ];
 
             let color_attachment_refs = [vk::AttachmentReference {
@@ -664,7 +641,7 @@ impl<'a> App<'a> {
 
             let subpass = vk::SubpassDescription::default()
                 .color_attachments(&color_attachment_refs)
-                // .depth_stencil_attachment(&depth_attachment_refs)
+                .depth_stencil_attachment(&depth_attachment_refs)
                 .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS);
 
             let renderpass_createinfo = vk::RenderPassCreateInfo::default()
@@ -685,8 +662,7 @@ impl<'a> App<'a> {
             .present_image_views
             .iter()
             .map(|&present_image_view| {
-                let framebuffer_attachments =
-                    [present_image_view /*, vk_base.depth_image.view*/];
+                let framebuffer_attachments = [present_image_view, vk_base.depth_image.view];
                 let framebuffer_createinfo = vk::FramebufferCreateInfo::default()
                     .render_pass(self.renderpass)
                     .attachments(&framebuffer_attachments)
@@ -726,7 +702,7 @@ impl<'a> App<'a> {
             0.1,
         );
 
-        self.light = DirectionalLight::new(Vec3::new(0.0, 0.0, -1.0));
+        self.light = DirectionalLight::new(Vec3::new(0.0, 0.0, 1.0));
 
         let camera_transform_size = size_of::<Mat4>();
         let light_data_size = size_of::<Vec4>();
@@ -969,7 +945,7 @@ impl<'a> App<'a> {
                 .viewport_state(&viewport_state_info)
                 .rasterization_state(&rasterization_info)
                 .multisample_state(&multisample_state_info)
-                // .depth_stencil_state(&depth_state_info)
+                .depth_stencil_state(&depth_state_info)
                 .color_blend_state(&color_blend_state)
                 .dynamic_state(&dynamic_state_info)
                 .layout(self.pipeline_layout)
@@ -1040,7 +1016,7 @@ impl<'a> App<'a> {
 
         let image_extent = vk_base.swapchain.image_extent();
         for image_view in &vk_base.present_image_views {
-            let framebuffer_attachments = [*image_view /*, vk_base.depth_image.view*/];
+            let framebuffer_attachments = [*image_view, vk_base.depth_image.view];
             let framebuffer_createinfo = vk::FramebufferCreateInfo::default()
                 .render_pass(self.renderpass)
                 .attachments(&framebuffer_attachments)
@@ -1056,6 +1032,8 @@ impl<'a> App<'a> {
             self.framebuffers.push(framebuffer);
         }
     }
+
+    pub fn record_command_buffer(&mut self) {}
 
     pub fn draw(&mut self) {
         let vk_base = if let Some(base) = self.vk_base.as_ref() {
@@ -1109,12 +1087,12 @@ impl<'a> App<'a> {
                     float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
                 },
             },
-            // vk::ClearValue {
-            //     depth_stencil: vk::ClearDepthStencilValue {
-            //         depth: 1.0,
-            //         stencil: 0,
-            //     },
-            // },
+            vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
         ];
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::default()
