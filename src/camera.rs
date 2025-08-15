@@ -46,10 +46,7 @@ impl Camera {
 
     /// Return the matrix that transforms a point from world space into the camera space.
     pub fn view_matrix(&self) -> Mat4 {
-        let m3_world_y = Mat3::from_rotation_y(self.rotation_world_y);
-        let m3_local_x = Mat3::from_axis_angle(m3_world_y.x_axis, self.rotation_local_x);
-        let m3 = m3_local_x * m3_world_y;
-        let r = Mat4::from_mat3(m3.inverse());
+        let r = Mat4::from_mat3(self.rotation.inverse());
         let t = Mat4::from_translation(-self.position);
         r * t
     }
