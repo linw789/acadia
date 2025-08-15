@@ -853,7 +853,9 @@ impl<'a> App<'a> {
         let pers_matrix = self
             .camera
             .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
-        let vp_matrix = [pers_matrix * view_matrix];
+        // Compensate for Vulkan NDC's y-axis being pointing downwards.
+        let negative_y_matrix = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
+        let vp_matrix = [negative_y_matrix * pers_matrix * view_matrix];
 
         let camera_transform_size = size_of::<Mat4>();
         // let light_data_size = size_of::<Vec4>();

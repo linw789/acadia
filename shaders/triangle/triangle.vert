@@ -19,7 +19,6 @@ layout (location = 3) out vec3 out_light_dir;
 
 void main() {
     gl_Position = frame_data.pers_view_matrix * pos;
-    gl_Position.y = -gl_Position.y;
 
     out_color = color;
     out_normal = normal.xyz;
