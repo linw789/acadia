@@ -415,7 +415,7 @@ impl Drop for VkBase {
     }
 }
 
-const MAX_FRAMES_IN_FLIGHT: usize = 2;
+const MAX_FRAMES_IN_FLIGHT: u64 = 2;
 
 #[derive(Default)]
 struct App<'a> {
@@ -449,7 +449,7 @@ struct App<'a> {
     scissors: Vec<vk::Rect2D>,
     graphics_pipelines: Vec<vk::Pipeline>,
 
-    frame_count: usize,
+    frame_count: u64,
 
     pub camera: Camera,
     pub light: DirectionalLight,
@@ -475,7 +475,7 @@ impl<'a> App<'a> {
     pub fn prepare_pipeline(&mut self) {
         let vk_base = self.vk_base.as_ref().unwrap();
 
-        assert!(MAX_FRAMES_IN_FLIGHT <= vk_base.swapchain.present_images().len());
+        assert!(MAX_FRAMES_IN_FLIGHT <= (vk_base.swapchain.present_images().len() as u64));
 
         self.draw_cmd_bufs = unsafe {
             let allocinfo = vk::CommandBufferAllocateInfo::default()
@@ -952,14 +952,14 @@ impl<'a> App<'a> {
 
     pub fn record_command_buffer(&mut self) {}
 
-    pub fn draw(&mut self) {
+    pub fn draw_frame(&mut self) {
         let vk_base = if let Some(base) = self.vk_base.as_ref() {
             base
         } else {
             return;
         };
 
-        let in_flight_frame_index = self.frame_count % MAX_FRAMES_IN_FLIGHT;
+        let in_flight_frame_index = (self.frame_count % MAX_FRAMES_IN_FLIGHT) as usize;
         let present_acquired_semaphore = self.present_acquired_semaphores[in_flight_frame_index];
         let frame_fence = self.frame_fences[in_flight_frame_index];
         let cmd_buf = self.draw_cmd_bufs[in_flight_frame_index];
@@ -1107,11 +1107,7 @@ impl<'a> App<'a> {
             present_index,
         );
 
-        // unsafe {
-        //     vk_base.device.device_wait_idle().unwrap();
-        // }
-
-        assert!(self.frame_count < usize::MAX);
+        assert!(self.frame_count < u64::MAX);
         self.frame_count += 1;
     }
 }
@@ -1175,7 +1171,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                self.draw();
+                self.draw_frame();
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(size) => {
