@@ -161,7 +161,7 @@ impl VkBase {
                 .application_version(0)
                 .engine_name(c"Acadia Vulkan Renderer")
                 .engine_version(0)
-                .api_version(vk::make_api_version(0, 1, 0, 1));
+                .api_version(vk::make_api_version(0, 1, 3, 0));
 
             let create_flags = vk::InstanceCreateFlags::default();
 
@@ -241,10 +241,11 @@ impl VkBase {
 
         let device = {
             let device_extension_names_raw = [khr::swapchain::NAME.as_ptr()];
-            let features = vk::PhysicalDeviceFeatures {
-                shader_clip_distance: 1,
-                ..Default::default()
-            };
+            let features = vk::PhysicalDeviceFeatures::default().shader_clip_distance(true);
+            let mut vk13_features = vk::PhysicalDeviceVulkan13Features::default()
+                .synchronization2(true)
+                .dynamic_rendering(true);
+
             let priorities = [1.0];
             let queue_info = vk::DeviceQueueCreateInfo::default()
                 .queue_family_index(queue_family_index)
@@ -252,7 +253,8 @@ impl VkBase {
             let device_createinfo = vk::DeviceCreateInfo::default()
                 .queue_create_infos(std::slice::from_ref(&queue_info))
                 .enabled_extension_names(&device_extension_names_raw)
-                .enabled_features(&features);
+                .enabled_features(&features)
+                .push_next(&mut vk13_features);
             unsafe {
                 inst.create_device(physical_device, &device_createinfo, None)
                     .unwrap()
@@ -424,8 +426,6 @@ struct App<'a> {
     window: Option<Window>,
     vk_base: Option<VkBase>,
 
-    renderpass: vk::RenderPass,
-    framebuffers: Vec<vk::Framebuffer>,
     // TODO: why do bindings need a lifetime?
     desc_set_layout_bindings: Vec<vk::DescriptorSetLayoutBinding<'a>>,
     desc_set_layouts: Vec<vk::DescriptorSetLayout>,
@@ -516,84 +516,7 @@ impl<'a> App<'a> {
                 .collect()
         };
 
-        self.renderpass = {
-            let renderpass_attachments = [
-                vk::AttachmentDescription {
-                    format: vk_base.surface_format.format,
-                    samples: vk::SampleCountFlags::TYPE_1,
-                    load_op: vk::AttachmentLoadOp::CLEAR,
-                    store_op: vk::AttachmentStoreOp::STORE,
-                    final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                    ..Default::default()
-                },
-                vk::AttachmentDescription {
-                    format: vk::Format::D16_UNORM,
-                    samples: vk::SampleCountFlags::TYPE_1,
-                    load_op: vk::AttachmentLoadOp::CLEAR,
-                    initial_layout: vk::ImageLayout::UNDEFINED,
-                    final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    ..Default::default()
-                },
-            ];
-
-            let color_attachment_refs = [vk::AttachmentReference {
-                attachment: 0,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }];
-            let depth_attachment_refs = vk::AttachmentReference {
-                attachment: 1,
-                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            };
-
-            let dependencies = [vk::SubpassDependency {
-                src_subpass: vk::SUBPASS_EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access_mask: vk::AccessFlags::NONE_KHR,
-                dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_READ
-                    | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                ..Default::default()
-            }];
-
-            let subpass = vk::SubpassDescription::default()
-                .color_attachments(&color_attachment_refs)
-                .depth_stencil_attachment(&depth_attachment_refs)
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS);
-
-            let renderpass_createinfo = vk::RenderPassCreateInfo::default()
-                .attachments(&renderpass_attachments)
-                .subpasses(std::slice::from_ref(&subpass))
-                .dependencies(&dependencies);
-
-            unsafe {
-                vk_base
-                    .device
-                    .create_render_pass(&renderpass_createinfo, None)
-                    .expect("Failed to create render pass.")
-            }
-        };
-
         let image_extent = vk_base.swapchain.image_extent();
-        self.framebuffers = vk_base
-            .present_image_views
-            .iter()
-            .map(|&present_image_view| {
-                let framebuffer_attachments = [present_image_view, vk_base.depth_image.view];
-                let framebuffer_createinfo = vk::FramebufferCreateInfo::default()
-                    .render_pass(self.renderpass)
-                    .attachments(&framebuffer_attachments)
-                    .width(image_extent.width)
-                    .height(image_extent.height)
-                    .layers(1);
-                unsafe {
-                    vk_base
-                        .device
-                        .create_framebuffer(&framebuffer_createinfo, None)
-                        .expect("Failed to create frame buffer.")
-                }
-            })
-            .collect();
 
         self.mesh = Mesh::from_obj("./assets/stanford-bunny.obj");
 
@@ -621,8 +544,8 @@ impl<'a> App<'a> {
 
         self.light = DirectionalLight::new(Vec3::new(0.0, 0.0, 1.0));
 
-        let camera_transform_size = size_of::<Mat4>();
-        let light_data_size = size_of::<Vec4>();
+        // let camera_transform_size = size_of::<Mat4>();
+        // let light_data_size = size_of::<Vec4>();
         let frame_data_size = 96; // camera_transform_size + light_data_size;
         let frame_buffer_size = frame_data_size * MAX_FRAMES_IN_FLIGHT;
         self.frame_data_buffer = Buffer::new(
@@ -855,6 +778,11 @@ impl<'a> App<'a> {
             let dynamic_state_info =
                 vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_state);
 
+            let mut pipeline_rendering_createinfo = vk::PipelineRenderingCreateInfo::default()
+                .color_attachment_formats(std::slice::from_ref(&vk_base.surface_format.format))
+                // TODO: remove hard-coded depth format
+                .depth_attachment_format(vk::Format::D16_UNORM);
+
             let graphic_pipeline_info = vk::GraphicsPipelineCreateInfo::default()
                 .stages(&shader_stage_createinfos)
                 .vertex_input_state(&vertex_input_state_info)
@@ -866,7 +794,7 @@ impl<'a> App<'a> {
                 .color_blend_state(&color_blend_state)
                 .dynamic_state(&dynamic_state_info)
                 .layout(self.pipeline_layout)
-                .render_pass(self.renderpass);
+                .push_next(&mut pipeline_rendering_createinfo);
 
             unsafe {
                 vk_base
@@ -904,11 +832,7 @@ impl<'a> App<'a> {
             self.index_buffer.destroy(&vk_base.device);
             self.vertex_buffer.destroy(&vk_base.device);
             self.frame_data_buffer.destroy(&vk_base.device);
-            for framebuffer in &self.framebuffers {
-                vk_base.device.destroy_framebuffer(*framebuffer, None);
-            }
             vk_base.device.destroy_descriptor_pool(self.desc_pool, None);
-            vk_base.device.destroy_render_pass(self.renderpass, None);
             for sema in &self.present_acquired_semaphores {
                 vk_base.device.destroy_semaphore(*sema, None);
             }
@@ -918,35 +842,6 @@ impl<'a> App<'a> {
             for fence in &self.frame_fences {
                 vk_base.device.destroy_fence(*fence, None);
             }
-        }
-    }
-
-    pub fn update_framebuffers(&mut self) {
-        let vk_base = self.vk_base.as_ref().unwrap();
-
-        for framebuffer in &self.framebuffers {
-            unsafe {
-                vk_base.device.destroy_framebuffer(*framebuffer, None);
-            }
-        }
-        self.framebuffers.clear();
-
-        let image_extent = vk_base.swapchain.image_extent();
-        for image_view in &vk_base.present_image_views {
-            let framebuffer_attachments = [*image_view, vk_base.depth_image.view];
-            let framebuffer_createinfo = vk::FramebufferCreateInfo::default()
-                .render_pass(self.renderpass)
-                .attachments(&framebuffer_attachments)
-                .width(image_extent.width)
-                .height(image_extent.height)
-                .layers(1);
-            let framebuffer = unsafe {
-                vk_base
-                    .device
-                    .create_framebuffer(&framebuffer_createinfo, None)
-                    .expect("Failed to create frame buffer.")
-            };
-            self.framebuffers.push(framebuffer);
         }
     }
 
@@ -961,7 +856,7 @@ impl<'a> App<'a> {
         let vp_matrix = [pers_matrix * view_matrix];
 
         let camera_transform_size = size_of::<Mat4>();
-        let light_data_size = size_of::<Vec4>();
+        // let light_data_size = size_of::<Vec4>();
         let frame_data_size = 96; // camera_transform_size + light_data_size;
         let frame_data_offset = in_flight_frame_index * frame_data_size;
         self.frame_data_buffer
@@ -972,56 +867,14 @@ impl<'a> App<'a> {
             .copy_data(frame_data_offset + camera_transform_size, &light_data);
     }
 
-    pub fn record_command_buffer(&mut self) {}
+    pub fn record_command_buffer(&self, present_image_index: usize, in_flight_frame_index: usize) {
+        let vk_base = self.vk_base.as_ref().unwrap();
 
-    pub fn draw_frame(&mut self) {
-        let vk_base = if let Some(base) = self.vk_base.as_ref() {
-            base
-        } else {
-            return;
-        };
-
-        let in_flight_frame_index = (self.frame_count % MAX_FRAMES_IN_FLIGHT) as usize;
-        let present_acquired_semaphore = self.present_acquired_semaphores[in_flight_frame_index];
-        let frame_fence = self.frame_fences[in_flight_frame_index];
         let cmd_buf = self.draw_cmd_bufs[in_flight_frame_index];
+        let present_image = vk_base.swapchain.present_images()[present_image_index];
+        let present_image_view = vk_base.present_image_views[present_image_index];
 
-        unsafe {
-            vk_base
-                .device
-                .wait_for_fences(&[frame_fence], true, u64::MAX)
-                .unwrap();
-            vk_base.device.reset_fences(&[frame_fence]).unwrap();
-        }
-
-        self.update_uniform_buffer(in_flight_frame_index);
-
-        let present_index = vk_base
-            .swapchain
-            .acquire_next_image(present_acquired_semaphore);
-
-        let render_complete_semaphore = self.render_complete_semaphores[present_index as usize];
-
-        let clear_values = [
-            vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
-                },
-            },
-            vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                },
-            },
-        ];
-
-        let render_pass_begin_info = vk::RenderPassBeginInfo::default()
-            .render_pass(self.renderpass)
-            .framebuffer(self.framebuffers[present_index as usize])
-            .render_area(vk_base.swapchain.image_extent().into())
-            .clear_values(&clear_values);
-
+        // Re-start command buffer recording.
         unsafe {
             vk_base
                 .device
@@ -1030,17 +883,103 @@ impl<'a> App<'a> {
 
             let cmd_buf_begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
             vk_base
                 .device
                 .begin_command_buffer(cmd_buf, &cmd_buf_begin_info)
                 .expect("Failed to begin command buffer recording.");
+        }
 
-            vk_base.device.cmd_begin_render_pass(
-                cmd_buf,
-                &render_pass_begin_info,
-                vk::SubpassContents::INLINE,
-            );
+        // First transition the present image to the layout COLOR_ATTACHMENT_OPTIMAL.
+        unsafe {
+            let barrier = vk::ImageMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+                .src_access_mask(vk::AccessFlags2::NONE)
+                .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+                .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(present_image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let dependency_info =
+                vk::DependencyInfo::default().image_memory_barriers(std::slice::from_ref(&barrier));
+            vk_base
+                .device
+                .cmd_pipeline_barrier2(cmd_buf, &dependency_info);
+        }
+
+        // Transition the depth image to the layout DEPTH_ATTACHMENT_OPTIMAL.
+        unsafe {
+            let barrier = vk::ImageMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+                .src_access_mask(vk::AccessFlags2::NONE)
+                .dst_stage_mask(
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                        | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                )
+                .dst_access_mask(
+                    vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+                        | vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ,
+                )
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(vk_base.depth_image.image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::DEPTH,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let dependency_info =
+                vk::DependencyInfo::default().image_memory_barriers(std::slice::from_ref(&barrier));
+            vk_base
+                .device
+                .cmd_pipeline_barrier2(cmd_buf, &dependency_info);
+        }
+
+        // Set up rendering pipeline.
+        unsafe {
+            let color_attachment_info = vk::RenderingAttachmentInfo::default()
+                .image_view(present_image_view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
+                    },
+                });
+            let depth_attachment_info = vk::RenderingAttachmentInfo::default()
+                .image_view(vk_base.depth_image.view)
+                .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                });
+            let rendering_info = vk::RenderingInfo::default()
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: vk_base.swapchain.image_extent(),
+                })
+                .layer_count(1)
+                .color_attachments(std::slice::from_ref(&color_attachment_info))
+                .depth_attachment(&depth_attachment_info);
+
+            vk_base.device.cmd_begin_rendering(cmd_buf, &rendering_info);
 
             vk_base.device.cmd_bind_pipeline(
                 cmd_buf,
@@ -1061,8 +1000,19 @@ impl<'a> App<'a> {
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
             vk_base.device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
-            let camera_transform_size = size_of::<Mat4>();
-            let light_data_size = size_of::<Vec4>();
+            vk_base
+                .device
+                .cmd_bind_vertex_buffers(cmd_buf, 0, &[self.vertex_buffer.buf], &[0]);
+
+            vk_base.device.cmd_bind_index_buffer(
+                cmd_buf,
+                self.index_buffer.buf,
+                0,
+                vk::IndexType::UINT32,
+            );
+
+            // let camera_transform_size = size_of::<Mat4>();
+            // let light_data_size = size_of::<Vec4>();
             let frame_data_size = 96; // camera_transform_size + light_data_size;
             vk_base.device.cmd_bind_descriptor_sets(
                 cmd_buf,
@@ -1075,26 +1025,75 @@ impl<'a> App<'a> {
 
             vk_base
                 .device
-                .cmd_bind_vertex_buffers(cmd_buf, 0, &[self.vertex_buffer.buf], &[0]);
-
-            vk_base.device.cmd_bind_index_buffer(
-                cmd_buf,
-                self.index_buffer.buf,
-                0,
-                vk::IndexType::UINT32,
-            );
-
-            vk_base
-                .device
                 .cmd_draw_indexed(cmd_buf, self.mesh.indices.len() as u32, 1, 0, 0, 1);
 
-            vk_base.device.cmd_end_render_pass(cmd_buf);
+            vk_base.device.cmd_end_rendering(cmd_buf);
+        }
 
+        // After rendering, transition the present image to the layout PRESENT_SRC_KHR.
+        unsafe {
+            let barrier = vk::ImageMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+                .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+                .dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
+                .dst_access_mask(vk::AccessFlags2::NONE)
+                .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(present_image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let dependency_info =
+                vk::DependencyInfo::default().image_memory_barriers(std::slice::from_ref(&barrier));
             vk_base
                 .device
-                .end_command_buffer(cmd_buf)
-                .expect("Failed to end command buffer recording.");
+                .cmd_pipeline_barrier2(cmd_buf, &dependency_info);
+        }
 
+        // End command buffer recording.
+        unsafe {
+            vk_base.device.end_command_buffer(cmd_buf).unwrap();
+        }
+    }
+
+    pub fn draw_frame(&mut self) {
+        let vk_base = if let Some(base) = self.vk_base.as_ref() {
+            base
+        } else {
+            return;
+        };
+
+        let in_flight_frame_index = (self.frame_count % MAX_FRAMES_IN_FLIGHT) as usize;
+        let present_acquired_semaphore = self.present_acquired_semaphores[in_flight_frame_index];
+        let frame_fence = self.frame_fences[in_flight_frame_index];
+
+        unsafe {
+            vk_base
+                .device
+                .wait_for_fences(&[frame_fence], true, u64::MAX)
+                .unwrap();
+            vk_base.device.reset_fences(&[frame_fence]).unwrap();
+        }
+
+        // TODO: recreate swapchain if vkResult is OUT_OF_DATE.
+        let present_image_index = vk_base
+            .swapchain
+            .acquire_next_image(present_acquired_semaphore)
+            .unwrap() as usize;
+
+        let render_complete_semaphore = self.render_complete_semaphores[present_image_index];
+
+        self.update_uniform_buffer(in_flight_frame_index);
+        self.record_command_buffer(present_image_index, in_flight_frame_index);
+
+        unsafe {
+            let cmd_buf = self.draw_cmd_bufs[in_flight_frame_index];
             let submit_info = vk::SubmitInfo::default()
                 .wait_semaphores(std::slice::from_ref(&present_acquired_semaphore))
                 .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
@@ -1105,12 +1104,12 @@ impl<'a> App<'a> {
                 .device
                 .queue_submit(vk_base.present_queue, &[submit_info], frame_fence)
                 .expect("Failed to queue submit.");
-        };
+        }
 
         vk_base.swapchain.queue_present(
             vk_base.present_queue,
             render_complete_semaphore,
-            present_index,
+            present_image_index as u32,
         );
 
         assert!(self.frame_count < u64::MAX);
@@ -1187,9 +1186,6 @@ impl<'a> ApplicationHandler for App<'a> {
                         width: size.width,
                         height: size.height,
                     });
-                    if recreated {
-                        self.update_framebuffers();
-                    }
                 }
             }
             _ => (),

@@ -1,4 +1,4 @@
-use ::ash::{Device, Instance, khr::swapchain, vk};
+use ::ash::{Device, Instance, khr::swapchain, prelude::*, vk};
 
 pub struct Swapchain {
     loader: swapchain::Device,
@@ -140,14 +140,19 @@ impl Swapchain {
         }
     }
 
-    pub fn acquire_next_image(&self, acquire_sema: vk::Semaphore) -> u32 {
-        let (present_image_index, _is_suboptimal) = unsafe {
-            self.loader
-                .acquire_next_image(self.swapchain, u64::MAX, acquire_sema, vk::Fence::null())
-                .unwrap()
+    pub fn acquire_next_image(&self, acquire_sema: vk::Semaphore) -> VkResult<u32> {
+        let result = unsafe {
+            self.loader.acquire_next_image(
+                self.swapchain,
+                u64::MAX,
+                acquire_sema,
+                vk::Fence::null(),
+            )
         };
-        // TODO: warn if sub-optimal
-        present_image_index
+        result.map(|(present_image_index, _is_optimal)| {
+            // TODO: warn if sub-optimal
+            present_image_index
+        })
     }
 
     pub fn queue_present(
