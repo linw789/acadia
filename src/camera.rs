@@ -21,6 +21,10 @@ impl Camera {
         }
     }
 
+    pub fn lookat_dir(&self) -> Vec3 {
+        self.rotation.z_axis
+    }
+
     pub fn translate_local(&mut self, t: Vec3) {
         self.position +=
             t.x * self.rotation.x_axis + t.y * self.rotation.y_axis + t.z * self.rotation.z_axis;

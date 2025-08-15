@@ -452,7 +452,6 @@ struct App<'a> {
     frame_count: u64,
 
     pub camera: Camera,
-    pub light: DirectionalLight,
 
     pub is_left_button_pressed: bool,
 }
@@ -542,8 +541,6 @@ impl<'a> App<'a> {
             0.1,
         );
 
-        self.light = DirectionalLight::new(Vec3::new(0.0, 0.0, 1.0));
-
         // let camera_transform_size = size_of::<Mat4>();
         // let light_data_size = size_of::<Vec4>();
         let frame_data_size = 96; // camera_transform_size + light_data_size;
@@ -593,14 +590,13 @@ impl<'a> App<'a> {
 
         self.scissors = vec![image_extent.into()];
 
-        self.desc_set_layout_bindings = {
-            let layout_binding = vk::DescriptorSetLayoutBinding::default()
+        self.desc_set_layout_bindings = vec![
+            vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
                 .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX);
-            vec![layout_binding]
-        };
+                .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
+        ];
 
         self.desc_set_layouts = {
             let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
@@ -864,7 +860,7 @@ impl<'a> App<'a> {
         self.frame_data_buffer
             .copy_data(frame_data_offset, &vp_matrix);
 
-        let light_data = [Vec4::from((self.light.direction, 1.0))];
+        let light_data = [Vec4::from((self.camera.lookat_dir(), 1.0))];
         self.frame_data_buffer
             .copy_data(frame_data_offset + camera_transform_size, &light_data);
     }
@@ -1141,7 +1137,7 @@ impl<'a> ApplicationHandler for App<'a> {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
-                let scale = 0.01;
+                let scale = 0.02;
                 if event.state.is_pressed() {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowLeft)
