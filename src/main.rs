@@ -950,6 +950,28 @@ impl<'a> App<'a> {
         }
     }
 
+    pub fn update_uniform_buffer(&self, in_flight_frame_index: usize) {
+        let vk_base = self.vk_base.as_ref().unwrap();
+
+        let image_extent = vk_base.swapchain.image_extent();
+        let view_matrix = self.camera.view_matrix();
+        let pers_matrix = self
+            .camera
+            .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
+        let vp_matrix = [pers_matrix * view_matrix];
+
+        let camera_transform_size = size_of::<Mat4>();
+        let light_data_size = size_of::<Vec4>();
+        let frame_data_size = 96; // camera_transform_size + light_data_size;
+        let frame_data_offset = in_flight_frame_index * frame_data_size;
+        self.frame_data_buffer
+            .copy_data(frame_data_offset, &vp_matrix);
+
+        let light_data = [Vec4::from((self.light.direction, 1.0))];
+        self.frame_data_buffer
+            .copy_data(frame_data_offset + camera_transform_size, &light_data);
+    }
+
     pub fn record_command_buffer(&mut self) {}
 
     pub fn draw_frame(&mut self) {
@@ -972,23 +994,7 @@ impl<'a> App<'a> {
             vk_base.device.reset_fences(&[frame_fence]).unwrap();
         }
 
-        let image_extent = vk_base.swapchain.image_extent();
-        let view_matrix = self.camera.view_matrix();
-        let pers_matrix = self
-            .camera
-            .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
-        let vp_matrix = [pers_matrix * view_matrix];
-
-        let camera_transform_size = size_of::<Mat4>();
-        let light_data_size = size_of::<Vec4>();
-        let frame_data_size = 96; // camera_transform_size + light_data_size;
-        let frame_data_offset = in_flight_frame_index * frame_data_size;
-        self.frame_data_buffer
-            .copy_data(frame_data_offset, &vp_matrix);
-
-        let light_data = [Vec4::from((self.light.direction, 1.0))];
-        self.frame_data_buffer
-            .copy_data(frame_data_offset + camera_transform_size, &light_data);
+        self.update_uniform_buffer(in_flight_frame_index);
 
         let present_index = vk_base
             .swapchain
