@@ -1,33 +1,99 @@
 use glam::{Mat3, Mat4, Vec3};
-use std::f32::consts::PI;
+use std::{f32::consts::PI, io::Error, io::ErrorKind, result::Result};
 
 pub struct Camera {
     position: Vec3,
-    rotation: Mat3,
+    bases: Mat3,
     rotation_world_y: f32,
     rotation_local_x: f32,
     fov_y: f32,
     near_z: f32,
 }
 
-impl Camera {
-    /// `fov_y` is the field-of-view along y-axis in radian.
-    pub fn new(pos: Vec3, fov_y: f32, near_z: f32) -> Self {
+pub struct CameraBuilder {
+    position: Vec3,
+    up: Vec3,
+    lookat: Vec3,
+    fov_y: f32,
+    near_z: f32,
+}
+
+impl CameraBuilder {
+    pub fn new() -> Self {
         Self {
-            position: pos,
-            fov_y,
-            near_z,
-            ..Default::default()
+            position: Vec3::ZERO,
+            up: Vec3::new(0.0, 1.0, 0.0),
+            lookat: Vec3::new(0.0, 0.0, -1.0),
+            fov_y: 40.0,
+            near_z: -0.5,
         }
     }
 
+    pub fn position(mut self, pos: Vec3) -> Self {
+        self.position = pos;
+        self
+    }
+
+    /// `up` is a normalized direction pointing upwards from the camera. It must not be parallel
+    /// with the `lookat` direction.
+    pub fn up(mut self, up: Vec3) -> Self {
+        self.up = up;
+        self
+    }
+
+    /// `lookat` is the normalized direction the camera is viewing. It must not be parallel with
+    /// the `up` direction.
+    pub fn lookat(mut self, lookat: Vec3) -> Self {
+        self.lookat = lookat;
+        self
+    }
+
+    /// `fov_y` is the field-of-view along y-axis in radian.
+    pub fn fov_y(mut self, fov_y: f32) -> Self {
+        self.fov_y = fov_y;
+        self
+    }
+
+    pub fn near_z(mut self, near_z: f32) -> Self {
+        self.near_z = near_z;
+        self
+    }
+
+    /// Return a `Camera`. If `up` and `lookat` are almost parallel, return ErrorKind::InvalidInput.
+    pub fn build(self) -> Result<Camera, Error> {
+        let up = self.up.normalize();
+        // By Vulkan's convention, camera's lookat points to local -z axis.
+        let z_axis = -self.lookat.normalize();
+
+        if f32::abs(Vec3::dot(up, z_axis)) > 0.99 {
+            return Err(Error::from(ErrorKind::InvalidInput));
+        }
+
+        let x_axis = Vec3::cross(up, z_axis).normalize();
+        let y_axis = Vec3::cross(z_axis, x_axis).normalize();
+
+        Ok(Camera {
+            position: self.position,
+            bases: Mat3 {
+                x_axis,
+                y_axis,
+                z_axis,
+            },
+            fov_y: self.fov_y,
+            near_z: self.near_z,
+            ..Default::default()
+        })
+    }
+}
+
+impl Camera {
     pub fn lookat_dir(&self) -> Vec3 {
-        self.rotation.z_axis
+        self.bases.z_axis
     }
 
     pub fn translate_local(&mut self, t: Vec3) {
         self.position +=
-            t.x * self.rotation.x_axis + t.y * self.rotation.y_axis + t.z * self.rotation.z_axis;
+            t.x * self.bases.x_axis + t.y * self.bases.y_axis + t.z * self.bases.z_axis;
     }
 
     /// Rotate camera around its world y-axis by `angle` in radian.
@@ -35,24 +101,27 @@ impl Camera {
         self.rotation_world_y += angle;
         let m3_world_y = Mat3::from_rotation_y(self.rotation_world_y);
         let m3_local_x = Mat3::from_axis_angle(m3_world_y.x_axis, self.rotation_local_x);
-        self.rotation = m3_local_x * m3_world_y;
+        self.bases = m3_local_x * m3_world_y;
     }
 
-    /// Rotate camera around its local x-axis by `angle` in radian. The total degree of rotation is
+    /// Rotate camera around its local x-axis by `angle` in radian. The total degree of bases is
     /// clamped to [-PI/2, PI/2].
     pub fn rotate_local_x(&mut self, angle: f32) {
         let rx = self.rotation_local_x + angle;
         self.rotation_local_x = f32::max(-0.5 * PI, f32::min(0.5 * PI, rx));
         let m3_world_y = Mat3::from_rotation_y(self.rotation_world_y);
         let m3_local_x = Mat3::from_axis_angle(m3_world_y.x_axis, self.rotation_local_x);
-        self.rotation = m3_local_x * m3_world_y;
+        self.bases = m3_local_x * m3_world_y;
     }
 
     /// Return the matrix that transforms a point from world space into the camera space.
     pub fn view_matrix(&self) -> Mat4 {
-        let r = Mat4::from_mat3(self.rotation.inverse());
-        let t = Mat4::from_translation(-self.position);
-        r * t
+        // let r = Mat4::from_mat3(self.bases.inverse());
+        // let t = Mat4::from_translation(-self.position);
+        // r * t
+        // I suppose one inverse() operation is faster?
+        let v = Mat4::from_translation(self.position) * Mat4::from_mat3(self.bases);
+        v.inverse()
     }
 
     /// Return the perspective matrix with z_near and infinity mapped to [0, 1].
@@ -66,7 +135,7 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             position: Vec3::ZERO,
-            rotation: Mat3::IDENTITY,
+            bases: Mat3::IDENTITY,
             rotation_world_y: 0.0,
             rotation_local_x: 0.0,
             fov_y: 45.0,

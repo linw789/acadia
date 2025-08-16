@@ -16,7 +16,7 @@ use ::winit::{
     window::{Window, WindowId},
 };
 use buffer::Buffer;
-use camera::Camera;
+use camera::{Camera, CameraBuilder};
 use common::Vertex;
 use glam::{Mat4, Vec3, Vec4};
 use image::Image;
@@ -535,11 +535,14 @@ impl<'a> App<'a> {
         );
         self.vertex_buffer.copy_data(0, &self.mesh.vertices);
 
-        self.camera = Camera::new(
-            Vec3::new(0.0, 0.0, 1.0),
-            40.0 / 180.0 * std::f32::consts::PI,
-            0.1,
-        );
+        self.camera = CameraBuilder::new()
+            .position(Vec3::new(0.0, 0.0, 1.0))
+            .up(Vec3::new(0.0, 1.0, 0.0))
+            .lookat(Vec3::new(0.0, 0.0, -1.0))
+            .fov_y(40.0 / 180.0 * std::f32::consts::PI)
+            .near_z(0.1)
+            .build()
+            .unwrap();
 
         // let camera_transform_size = size_of::<Mat4>();
         // let light_data_size = size_of::<Vec4>();
