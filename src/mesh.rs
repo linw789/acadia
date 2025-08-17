@@ -10,13 +10,8 @@ pub struct Mesh {
 
 impl Mesh {
     pub fn from_obj<P: AsRef<Path> + Debug>(obj_file: P) -> Self {
-        let (mesh, _material) = load_obj(&obj_file, &GPU_LOAD_OPTIONS).expect(
-            format!(
-                "Failed to load obj file at '{}'.",
-                obj_file.as_ref().display()
-            )
-            .as_ref(),
-        );
+        let (mesh, _material) = load_obj(&obj_file, &GPU_LOAD_OPTIONS)
+            .expect(format!("Failed to load obj file at '{:?}'.", obj_file).as_ref());
         let mesh = &mesh[0].mesh;
 
         let vertex_count = mesh.positions.len() / 3;

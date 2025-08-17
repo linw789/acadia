@@ -1,6 +1,4 @@
-#version 400
-#extension GL_ARB_separate_shader_objects: enable
-#extension GL_ARB_shading_language_420pack: enable
+#version 450
 
 layout (binding = 0) uniform FrameData {
     mat4 pers_view_matrix;

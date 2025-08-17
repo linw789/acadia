@@ -1,6 +1,7 @@
 mod buffer;
 mod camera;
 mod common;
+mod entity;
 mod image;
 mod light;
 mod mesh;
@@ -18,9 +19,9 @@ use ::winit::{
 use buffer::Buffer;
 use camera::{Camera, CameraBuilder};
 use common::Vertex;
+use entity::Entity;
 use glam::{Mat4, Vec3, Vec4};
 use image::Image;
-use light::DirectionalLight;
 use mesh::Mesh;
 use std::{
     borrow::Cow, error::Error, f32::consts::PI, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec,
@@ -433,11 +434,9 @@ struct App<'a> {
     desc_sets: Vec<vk::DescriptorSet>,
     desc_buf_infos: Vec<vk::DescriptorBufferInfo>,
     pipeline_layout: vk::PipelineLayout,
-    mesh: Mesh,
+    entity: Entity,
     index_buffer: Buffer,
     vertex_buffer: Buffer,
-    vertex_shader_module: vk::ShaderModule,
-    fragment_shader_module: vk::ShaderModule,
 
     frame_data_buffer: Buffer,
     frame_fences: Vec<vk::Fence>,
@@ -517,23 +516,23 @@ impl<'a> App<'a> {
 
         let image_extent = vk_base.swapchain.image_extent();
 
-        self.mesh = Mesh::from_obj("./assets/stanford-bunny.obj");
+        self.entity.add_mesh("./assets/stanford-bunny.obj");
 
         self.index_buffer = Buffer::new(
             &vk_base.device,
-            (size_of::<u32>() * self.mesh.indices.len()) as u64,
+            (size_of::<u32>() * self.entity.mesh.indices.len()) as u64,
             vk::BufferUsageFlags::INDEX_BUFFER,
             &vk_base.device_memory_properties,
         );
-        self.index_buffer.copy_data(0, &self.mesh.indices);
+        self.index_buffer.copy_data(0, &self.entity.mesh.indices);
 
         self.vertex_buffer = Buffer::new(
             &vk_base.device,
-            (size_of::<Vertex>() * self.mesh.vertices.len()) as u64,
+            (size_of::<Vertex>() * self.entity.mesh.vertices.len()) as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &vk_base.device_memory_properties,
         );
-        self.vertex_buffer.copy_data(0, &self.mesh.vertices);
+        self.vertex_buffer.copy_data(0, &self.entity.mesh.vertices);
 
         self.camera = CameraBuilder::new()
             .position(Vec3::new(0.0, 0.0, 1.0))
@@ -555,32 +554,10 @@ impl<'a> App<'a> {
             &vk_base.device_memory_properties,
         );
 
-        self.vertex_shader_module = unsafe {
-            let vertex_spv = {
-                let mut file = Cursor::new(
-                    &include_bytes!("../target/shaders/triangle/triangle.vert.spv")[..],
-                );
-                read_spv(&mut file).expect("Failed to read vertex shader spv file.")
-            };
-            let vertex_shader_info = vk::ShaderModuleCreateInfo::default().code(&vertex_spv);
-            vk_base
-                .device
-                .create_shader_module(&vertex_shader_info, None)
-                .expect("Failed to create vertex shader module")
-        };
-        self.fragment_shader_module = unsafe {
-            let frag_spv = {
-                let mut file = Cursor::new(
-                    &include_bytes!("../target/shaders/triangle/triangle.frag.spv")[..],
-                );
-                read_spv(&mut file).expect("Failed to read fragment shader spv file.")
-            };
-            let frag_shader_info = vk::ShaderModuleCreateInfo::default().code(&frag_spv);
-            vk_base
-                .device
-                .create_shader_module(&frag_shader_info, None)
-                .expect("Failed to create fragment shader module")
-        };
+        self.entity
+            .add_vertex_shader(&vk_base.device, "target/shaders/triangle/triangle.vert.spv");
+        self.entity
+            .add_fragment_shader(&vk_base.device, "target/shaders/triangle/triangle.frag.spv");
 
         self.viewports = vec![vk::Viewport {
             x: 0.0,
@@ -676,13 +653,13 @@ impl<'a> App<'a> {
             let shader_entry_name = c"main";
             let shader_stage_createinfos = [
                 vk::PipelineShaderStageCreateInfo {
-                    module: self.vertex_shader_module,
+                    module: self.entity.vertex_shader,
                     p_name: shader_entry_name.as_ptr(),
                     stage: vk::ShaderStageFlags::VERTEX,
                     ..Default::default()
                 },
                 vk::PipelineShaderStageCreateInfo {
-                    module: self.fragment_shader_module,
+                    module: self.entity.fragment_shader,
                     p_name: shader_entry_name.as_ptr(),
                     stage: vk::ShaderStageFlags::FRAGMENT,
                     ..Default::default()
@@ -822,12 +799,7 @@ impl<'a> App<'a> {
             vk_base
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            vk_base
-                .device
-                .destroy_shader_module(self.vertex_shader_module, None);
-            vk_base
-                .device
-                .destroy_shader_module(self.fragment_shader_module, None);
+            self.entity.destroy(&vk_base.device);
             self.index_buffer.destroy(&vk_base.device);
             self.vertex_buffer.destroy(&vk_base.device);
             self.frame_data_buffer.destroy(&vk_base.device);
@@ -1024,9 +996,14 @@ impl<'a> App<'a> {
                 &[(in_flight_frame_index * frame_data_size) as u32],
             );
 
-            vk_base
-                .device
-                .cmd_draw_indexed(cmd_buf, self.mesh.indices.len() as u32, 1, 0, 0, 1);
+            vk_base.device.cmd_draw_indexed(
+                cmd_buf,
+                self.entity.mesh.indices.len() as u32,
+                1,
+                0,
+                0,
+                1,
+            );
 
             vk_base.device.cmd_end_rendering(cmd_buf);
         }
