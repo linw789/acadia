@@ -11,7 +11,7 @@ pub struct Image {
 impl Image {
     pub fn new_depth_image(
         device: &Device,
-        device_memory_properties: vk::PhysicalDeviceMemoryProperties,
+        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         extent: vk::Extent2D,
     ) -> Self {
         let (image, view, memory) = unsafe {
@@ -64,6 +64,65 @@ impl Image {
 
             (depth_image, depth_image_view, depth_image_memory)
         };
+
+        Self {
+            image,
+            view,
+            memory,
+        }
+    }
+
+    pub fn new_texture_image(
+        device: &Device,
+        memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        extent: vk::Extent2D,
+    ) -> Self {
+        let image_format = vk::Format::R8G8B8A8_SRGB;
+        let image_createinfo = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(image_format)
+            .extent(extent.into())
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+        let image = unsafe { device.create_image(&image_createinfo, None).unwrap() };
+
+        let depth_image_memory_req = unsafe { device.get_image_memory_requirements(image) };
+        let depth_image_memory_index = find_memorytype_index(
+            &depth_image_memory_req,
+            &memory_properties,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )
+        .expect("Unable to find suitable memory index for depth image.");
+
+        let image_allocate_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(depth_image_memory_req.size)
+            .memory_type_index(depth_image_memory_index);
+
+        let memory = unsafe { device.allocate_memory(&image_allocate_info, None).unwrap() };
+
+        unsafe {
+            device
+                .bind_image_memory(image, memory, 0)
+                .expect("Unable to bind depth image memory.");
+        }
+
+        let view_createinfo = vk::ImageViewCreateInfo::default()
+            .image(image)
+            .format(image_format)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            });
+
+        let view = unsafe { device.create_image_view(&view_createinfo, None).unwrap() };
 
         Self {
             image,

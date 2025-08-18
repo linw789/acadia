@@ -1,6 +1,18 @@
 use std::{fs, io::Result, path::Path, process::Command, time::SystemTime};
 
 fn main() -> Result<()> {
+    compile_stb();
+    compile_shaders()
+}
+
+fn compile_stb() {
+    println!("cargo:rerun-if-changed=src/stb/");
+    cc::Build::new()
+        .file("src/stb/stb_image.c")
+        .compile("stb_image");
+}
+
+fn compile_shaders() -> Result<()> {
     println!("cargo:rerun-if-changed=shaders");
 
     let shaders_dir = Path::new("shaders");

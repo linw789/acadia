@@ -6,9 +6,10 @@ mod image;
 mod light;
 mod mesh;
 mod swapchain;
+mod texture;
 mod util;
 
-use ::ash::{Device, Entry, Instance, ext::debug_utils, khr, util::read_spv, vk};
+use ::ash::{Device, Entry, Instance, ext::debug_utils, khr, vk};
 use ::winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
@@ -22,10 +23,7 @@ use common::Vertex;
 use entity::Entity;
 use glam::{Mat4, Vec3, Vec4};
 use image::Image;
-use mesh::Mesh;
-use std::{
-    borrow::Cow, error::Error, f32::consts::PI, ffi, io::Cursor, os::raw::c_char, u32, vec::Vec,
-};
+use std::{borrow::Cow, error::Error, f32::consts::PI, ffi, os::raw::c_char, u32, vec::Vec};
 use swapchain::Swapchain;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
@@ -240,9 +238,16 @@ impl VkBase {
             (physical_device, graphics_queue_family_index as u32)
         };
 
+        unsafe {
+            let features = inst.get_physical_device_features(physical_device);
+            assert!(features.sampler_anisotropy == 1);
+        }
+
         let device = {
             let device_extension_names_raw = [khr::swapchain::NAME.as_ptr()];
-            let features = vk::PhysicalDeviceFeatures::default().shader_clip_distance(true);
+            let features = vk::PhysicalDeviceFeatures::default()
+                .shader_clip_distance(true)
+                .sampler_anisotropy(true);
             let mut vk13_features = vk::PhysicalDeviceVulkan13Features::default()
                 .synchronization2(true)
                 .dynamic_rendering(true);
@@ -319,7 +324,7 @@ impl VkBase {
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
         let depth_image =
-            Image::new_depth_image(&device, device_memory_properties, swapchain.image_extent());
+            Image::new_depth_image(&device, &device_memory_properties, swapchain.image_extent());
 
         Ok(Self {
             inst,
@@ -394,7 +399,7 @@ impl VkBase {
         self.depth_image.destroy(&self.device);
         self.depth_image = Image::new_depth_image(
             &self.device,
-            device_memory_properties,
+            &device_memory_properties,
             self.swapchain.image_extent(),
         );
     }
@@ -432,12 +437,10 @@ struct App<'a> {
     desc_set_layouts: Vec<vk::DescriptorSetLayout>,
     desc_pool: vk::DescriptorPool,
     desc_sets: Vec<vk::DescriptorSet>,
-    desc_buf_infos: Vec<vk::DescriptorBufferInfo>,
     pipeline_layout: vk::PipelineLayout,
     entity: Entity,
     index_buffer: Buffer,
     vertex_buffer: Buffer,
-
     frame_data_buffer: Buffer,
     frame_fences: Vec<vk::Fence>,
     present_acquired_semaphores: Vec<vk::Semaphore>,
@@ -516,7 +519,22 @@ impl<'a> App<'a> {
 
         let image_extent = vk_base.swapchain.image_extent();
 
-        self.entity.add_mesh("assets/stanford-bunny.obj");
+        self.entity.add_mesh("assets/square.obj");
+
+        let max_sampler_anisotropy = unsafe {
+            let properties = vk_base
+                .inst
+                .get_physical_device_properties(vk_base.physical_device);
+            properties.limits.max_sampler_anisotropy
+        };
+        self.entity.add_texture(
+            &vk_base.device,
+            self.draw_cmd_bufs[0],
+            vk_base.present_queue,
+            &vk_base.device_memory_properties,
+            max_sampler_anisotropy,
+            "assets/textures/checker.png",
+        );
 
         self.index_buffer = Buffer::new(
             &vk_base.device,
@@ -554,10 +572,14 @@ impl<'a> App<'a> {
             &vk_base.device_memory_properties,
         );
 
-        self.entity
-            .add_vertex_shader(&vk_base.device, "target/shaders/default/default.vert.spv");
-        self.entity
-            .add_fragment_shader(&vk_base.device, "target/shaders/default/default.frag.spv");
+        self.entity.add_vertex_shader(
+            &vk_base.device,
+            "target/shaders/default-texture/texture.vert.spv",
+        );
+        self.entity.add_fragment_shader(
+            &vk_base.device,
+            "target/shaders/default-texture/texture.frag.spv",
+        );
 
         self.viewports = vec![vk::Viewport {
             x: 0.0,
@@ -576,6 +598,11 @@ impl<'a> App<'a> {
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
         ];
 
         self.desc_set_layouts = {
@@ -591,10 +618,16 @@ impl<'a> App<'a> {
         };
 
         self.desc_pool = {
-            let pool_sizes = [vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC,
-                descriptor_count: 10,
-            }];
+            let pool_sizes = [
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC,
+                    descriptor_count: 1,
+                },
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 1,
+                },
+            ];
 
             let pool_createinfo = vk::DescriptorPoolCreateInfo::default()
                 .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
@@ -622,22 +655,32 @@ impl<'a> App<'a> {
             }
         };
 
-        self.desc_buf_infos = vec![
-            vk::DescriptorBufferInfo::default()
-                .buffer(self.frame_data_buffer.buf)
-                .offset(0)
-                .range(frame_data_size as u64),
+        let desc_buf_info = vk::DescriptorBufferInfo::default()
+            .buffer(self.frame_data_buffer.buf)
+            .offset(0)
+            .range(frame_data_size as u64);
+        let desc_image_info = vk::DescriptorImageInfo::default()
+            .sampler(self.entity.texture.as_ref().unwrap().sampler)
+            .image_view(self.entity.texture.as_ref().unwrap().image.view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+
+        let desc_writes = [
+            vk::WriteDescriptorSet::default()
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                .dst_set(self.desc_sets[0])
+                .dst_binding(0)
+                .dst_array_element(0)
+                .buffer_info(std::slice::from_ref(&desc_buf_info)),
+            vk::WriteDescriptorSet::default()
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .dst_set(self.desc_sets[0])
+                .dst_binding(1)
+                .dst_array_element(0)
+                .image_info(std::slice::from_ref(&desc_image_info)),
         ];
 
-        let desc_write = vk::WriteDescriptorSet::default()
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
-            .dst_set(self.desc_sets[0])
-            .dst_binding(0)
-            .dst_array_element(0)
-            .buffer_info(&self.desc_buf_infos);
-
         unsafe {
-            vk_base.device.update_descriptor_sets(&[desc_write], &[]);
+            vk_base.device.update_descriptor_sets(&desc_writes, &[]);
         }
 
         self.graphics_pipelines = {
@@ -676,7 +719,7 @@ impl<'a> App<'a> {
                 vk::VertexInputAttributeDescription {
                     location: 0,
                     binding: 0,
-                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    format: vk::Format::R32G32B32_SFLOAT,
                     offset: offset_of!(Vertex, pos) as u32,
                 },
                 vk::VertexInputAttributeDescription {
@@ -688,8 +731,14 @@ impl<'a> App<'a> {
                 vk::VertexInputAttributeDescription {
                     location: 2,
                     binding: 0,
-                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    format: vk::Format::R32G32B32_SFLOAT,
                     offset: offset_of!(Vertex, normal) as u32,
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 3,
+                    binding: 0,
+                    format: vk::Format::R32G32_SFLOAT,
+                    offset: offset_of!(Vertex, uv) as u32,
                 },
             ];
 

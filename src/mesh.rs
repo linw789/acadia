@@ -42,7 +42,7 @@ impl Mesh {
                 [0.0; 3]
             };
             let uv = if mesh.texcoords.len() > 0 {
-                [mesh.texcoords[vi * 3 + 0], mesh.texcoords[vi * 3 + 1]]
+                [mesh.texcoords[vi * 2 + 0], mesh.texcoords[vi * 2 + 1]]
             } else {
                 [0.0; 2]
             };

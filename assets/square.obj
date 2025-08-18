@@ -1,0 +1,12 @@
+v -0.1 0.1 0.0 # upper left
+v -0.1 -0.1 0.0 # lower left
+v 0.1 -0.1 0.0 # lower right
+v 0.1 0.1 0.0 # upper right
+
+vt 0.0 0.0
+vt 0.0 1.0
+vt 1.0 1.0
+vt 1.0 0.0
+
+f 1/1 2/2 4/4
+f 2/2 3/3 4/4
