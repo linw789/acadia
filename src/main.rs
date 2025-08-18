@@ -127,7 +127,6 @@ struct VkBase {
     pub surface_loader: khr::surface::Instance,
 
     device_memory_properties: vk::PhysicalDeviceMemoryProperties,
-    queue_family_index: u32,
     pub present_queue: vk::Queue,
 
     surface: vk::SurfaceKHR,
@@ -335,7 +334,6 @@ impl VkBase {
             surface_loader,
 
             device_memory_properties,
-            queue_family_index,
             present_queue,
 
             surface,
@@ -351,7 +349,7 @@ impl VkBase {
         })
     }
 
-    pub fn recreate_swapchain(&mut self, image_extent: vk::Extent2D) -> bool {
+    pub fn recreate_swapchain(&mut self, image_extent: vk::Extent2D) {
         let surface_capabilities = unsafe {
             self.surface_loader
                 .get_physical_device_surface_capabilities(self.physical_device, self.surface)
@@ -371,8 +369,6 @@ impl VkBase {
             self.update_present_image_views();
             self.update_depth_image();
         }
-
-        recreated
     }
 
     fn update_present_image_views(&mut self) {
@@ -1209,7 +1205,7 @@ impl<'a> ApplicationHandler for App<'a> {
             WindowEvent::Resized(size) => {
                 println!("[DEBUG LINW] resized requested");
                 if let Some(vk_base) = self.vk_base.as_mut() {
-                    let recreated = vk_base.recreate_swapchain(vk::Extent2D {
+                    vk_base.recreate_swapchain(vk::Extent2D {
                         width: size.width,
                         height: size.height,
                     });
