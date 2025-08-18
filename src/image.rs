@@ -131,7 +131,7 @@ impl Image {
         }
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destruct(&mut self, device: &Device) {
         unsafe {
             device.free_memory(self.memory, None);
             device.destroy_image_view(self.view, None);

@@ -184,7 +184,7 @@ impl Swapchain {
         self.image_extent
     }
 
-    pub fn destroy(&self) {
+    pub fn destruct(&self) {
         unsafe {
             self.loader.destroy_swapchain(self.swapchain, None);
         }

@@ -60,7 +60,7 @@ impl Buffer {
         }
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destruct(&mut self, device: &Device) {
         unsafe {
             device.free_memory(self.mem, None);
             device.destroy_buffer(self.buf, None);

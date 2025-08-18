@@ -165,7 +165,7 @@ impl Texture {
             device.queue_wait_idle(queue).unwrap();
         }
 
-        staging_buffer.destroy(device);
+        staging_buffer.destruct(device);
 
         let sampler_createinfo = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::LINEAR)
@@ -185,13 +185,13 @@ impl Texture {
         Self { image, sampler }
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destruct(&mut self, device: &Device) {
         unsafe {
             device.destroy_sampler(self.sampler, None);
         }
         self.sampler = vk::Sampler::null();
 
-        self.image.destroy(device);
+        self.image.destruct(device);
     }
 }
 

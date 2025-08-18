@@ -56,12 +56,12 @@ impl Entity {
         ));
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destruct(&mut self, device: &Device) {
         unsafe {
             device.destroy_shader_module(self.vertex_shader, None);
             device.destroy_shader_module(self.fragment_shader, None);
             if let Some(ref mut texture) = self.texture {
-                texture.destroy(device);
+                texture.destruct(device);
             }
         }
         self.vertex_shader = vk::ShaderModule::null();

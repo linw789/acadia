@@ -392,7 +392,7 @@ impl VkBase {
             self.inst
                 .get_physical_device_memory_properties(self.physical_device)
         };
-        self.depth_image.destroy(&self.device);
+        self.depth_image.destruct(&self.device);
         self.depth_image = Image::new_depth_image(
             &self.device,
             &device_memory_properties,
@@ -404,12 +404,12 @@ impl VkBase {
 impl Drop for VkBase {
     fn drop(&mut self) {
         unsafe {
-            self.depth_image.destroy(&self.device);
+            self.depth_image.destruct(&self.device);
             for view in &self.present_image_views {
                 self.device.destroy_image_view(*view, None);
             }
             self.device.destroy_command_pool(self.cmd_pool, None);
-            self.swapchain.destroy();
+            self.swapchain.destruct();
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);
             self.debug_util_loader
@@ -844,10 +844,10 @@ impl<'a> App<'a> {
             vk_base
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.entity.destroy(&vk_base.device);
-            self.index_buffer.destroy(&vk_base.device);
-            self.vertex_buffer.destroy(&vk_base.device);
-            self.frame_data_buffer.destroy(&vk_base.device);
+            self.entity.destruct(&vk_base.device);
+            self.index_buffer.destruct(&vk_base.device);
+            self.vertex_buffer.destruct(&vk_base.device);
+            self.frame_data_buffer.destruct(&vk_base.device);
             vk_base.device.destroy_descriptor_pool(self.desc_pool, None);
             for sema in &self.present_acquired_semaphores {
                 vk_base.device.destroy_semaphore(*sema, None);
