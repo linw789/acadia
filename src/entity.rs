@@ -1,4 +1,4 @@
-use crate::{mesh::Mesh, texture::Texture};
+use crate::{gui::font::FontBitmap, mesh::Mesh, texture::Texture};
 use ash::{Device, util::read_spv, vk};
 use std::{fmt::Debug, fs::File, path::Path};
 
@@ -8,6 +8,7 @@ pub struct Entity {
     pub vertex_shader: vk::ShaderModule,
     pub fragment_shader: vk::ShaderModule,
     pub texture: Option<Texture>,
+    pub font_bitmap: FontBitmap,
 }
 
 impl Entity {
@@ -44,15 +45,26 @@ impl Entity {
         queue: vk::Queue,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
         max_sampler_anistropy: f32,
-        texture_path: P,
+        _texture_path: P,
     ) {
-        self.texture = Some(Texture::new(
+        // self.texture = Some(Texture::new(
+        //     device,
+        //     cmd_buf,
+        //     queue,
+        //     memory_properties,
+        //     max_sampler_anistropy,
+        //     texture_path,
+        // ));
+
+        self.font_bitmap = FontBitmap::from_truetype("assets/fonts/LiberationSerif-Regular.ttf");
+
+        self.texture = Some(Texture::from_font_bitmap(
             device,
             cmd_buf,
             queue,
             memory_properties,
             max_sampler_anistropy,
-            texture_path,
+            &self.font_bitmap,
         ));
     }
 

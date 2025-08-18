@@ -75,12 +75,12 @@ impl Image {
     pub fn new_texture_image(
         device: &Device,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        format: vk::Format,
         extent: vk::Extent2D,
     ) -> Self {
-        let image_format = vk::Format::R8G8B8A8_SRGB;
         let image_createinfo = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
-            .format(image_format)
+            .format(format)
             .extent(extent.into())
             .mip_levels(1)
             .array_layers(1)
@@ -112,7 +112,7 @@ impl Image {
 
         let view_createinfo = vk::ImageViewCreateInfo::default()
             .image(image)
-            .format(image_format)
+            .format(format)
             .view_type(vk::ImageViewType::TYPE_2D)
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,

@@ -10,6 +10,9 @@ fn compile_stb() {
     cc::Build::new()
         .file("src/stb/stb_image.c")
         .compile("stb_image");
+    cc::Build::new()
+        .file("src/stb/stb_truetype.c")
+        .compile("stb_truetype");
 }
 
 fn compile_shaders() -> Result<()> {
@@ -43,7 +46,7 @@ fn compile_shaders() -> Result<()> {
         }
 
         if need_recompile(&src, &spv_path) {
-            println!("cargo:warning=glslc compiling {:?}", src);
+            println!("cargo:info=glslc compiling {:?}", src);
             let status = Command::new("glslc")
                 .arg(&src)
                 .arg("-o")

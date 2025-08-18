@@ -1,4 +1,4 @@
-use crate::{buffer::Buffer, image::Image};
+use crate::{buffer::Buffer, gui::font::FontBitmap, image::Image};
 use ash::{Device, vk};
 use libc::{c_char, c_int, c_void};
 use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path, ptr::null};
@@ -34,7 +34,7 @@ impl Texture {
         assert!(pixels != null());
 
         let texture_size = texture_width * texture_height * 4;
-        let mut staging_buffer = Buffer::new(
+        let staging_buffer = Buffer::new(
             device,
             texture_size as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
@@ -48,17 +48,113 @@ impl Texture {
             stbi_image_free(pixels as *mut c_void);
         }
 
-        let image = Image::new_texture_image(
+        let texture_extent = vk::Extent2D {
+            width: texture_width as u32,
+            height: texture_height as u32,
+        };
+
+        Self::from_buffer(
             device,
+            cmd_buf,
+            queue,
             memory_properties,
+            max_sampler_anisotropy,
+            vk::Format::R8G8B8A8_SRGB,
+            texture_extent,
+            staging_buffer,
+        )
+    }
+
+    pub fn from_font_bitmap(
+        device: &Device,
+        cmd_buf: vk::CommandBuffer,
+        queue: vk::Queue,
+        memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        max_sampler_anisotropy: f32,
+        font_bitmap: &FontBitmap,
+    ) -> Self {
+        let staging_buffer = Buffer::new(
+            device,
+            (font_bitmap.width * font_bitmap.height) as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            memory_properties,
+        );
+        staging_buffer.copy_data(0, &font_bitmap.pixels);
+
+        Self::from_buffer(
+            device,
+            cmd_buf,
+            queue,
+            memory_properties,
+            max_sampler_anisotropy,
+            vk::Format::R8_UNORM,
             vk::Extent2D {
-                width: texture_width as u32,
-                height: texture_height as u32,
+                width: font_bitmap.width,
+                height: font_bitmap.height,
             },
+            staging_buffer,
+        )
+    }
+
+    pub fn destruct(&mut self, device: &Device) {
+        unsafe {
+            device.destroy_sampler(self.sampler, None);
+        }
+        self.sampler = vk::Sampler::null();
+
+        self.image.destruct(device);
+    }
+
+    fn from_buffer(
+        device: &Device,
+        cmd_buf: vk::CommandBuffer,
+        queue: vk::Queue,
+        memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        max_sampler_anisotropy: f32,
+        image_format: vk::Format,
+        texture_extent: vk::Extent2D,
+        mut buffer: Buffer,
+    ) -> Self {
+        let image =
+            Image::new_texture_image(device, memory_properties, image_format, texture_extent);
+
+        Self::copy_buffer_to_image(
+            device,
+            cmd_buf,
+            queue,
+            buffer.buf,
+            image.image,
+            texture_extent,
         );
 
-        // Upload GPU commands to transfer texture.
+        buffer.destruct(device);
 
+        let sampler_createinfo = vk::SamplerCreateInfo::default()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_v(vk::SamplerAddressMode::REPEAT)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .mip_lod_bias(0.0)
+            .anisotropy_enable(false)
+            .max_anisotropy(max_sampler_anisotropy)
+            .compare_enable(false)
+            .compare_op(vk::CompareOp::ALWAYS);
+
+        let sampler = unsafe { device.create_sampler(&sampler_createinfo, None).unwrap() };
+
+        Self { image, sampler }
+    }
+
+    fn copy_buffer_to_image(
+        device: &Device,
+        cmd_buf: vk::CommandBuffer,
+        queue: vk::Queue,
+        texture_buffer: vk::Buffer,
+        texture_image: vk::Image,
+        extent: vk::Extent2D,
+    ) {
         unsafe {
             device
                 .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::RELEASE_RESOURCES)
@@ -82,7 +178,7 @@ impl Texture {
                 .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(image.image)
+                .image(texture_image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
@@ -108,16 +204,12 @@ impl Texture {
                     layer_count: 1,
                 })
                 .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
-                .image_extent(vk::Extent3D {
-                    width: texture_width as u32,
-                    height: texture_height as u32,
-                    depth: 1,
-                });
+                .image_extent(extent.into());
 
             device.cmd_copy_buffer_to_image(
                 cmd_buf,
-                staging_buffer.buf,
-                image.image,
+                texture_buffer,
+                texture_image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 std::slice::from_ref(&copy_region),
             );
@@ -134,7 +226,7 @@ impl Texture {
                 .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(image.image)
+                .image(texture_image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
@@ -164,34 +256,6 @@ impl Texture {
 
             device.queue_wait_idle(queue).unwrap();
         }
-
-        staging_buffer.destruct(device);
-
-        let sampler_createinfo = vk::SamplerCreateInfo::default()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::REPEAT)
-            .address_mode_v(vk::SamplerAddressMode::REPEAT)
-            .address_mode_w(vk::SamplerAddressMode::REPEAT)
-            .mip_lod_bias(0.0)
-            .anisotropy_enable(false)
-            .max_anisotropy(max_sampler_anisotropy)
-            .compare_enable(false)
-            .compare_op(vk::CompareOp::ALWAYS);
-
-        let sampler = unsafe { device.create_sampler(&sampler_createinfo, None).unwrap() };
-
-        Self { image, sampler }
-    }
-
-    pub fn destruct(&mut self, device: &Device) {
-        unsafe {
-            device.destroy_sampler(self.sampler, None);
-        }
-        self.sampler = vk::Sampler::null();
-
-        self.image.destruct(device);
     }
 }
 

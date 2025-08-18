@@ -2,6 +2,7 @@ mod buffer;
 mod camera;
 mod common;
 mod entity;
+mod gui;
 mod image;
 mod light;
 mod mesh;
@@ -568,14 +569,10 @@ impl<'a> App<'a> {
             &vk_base.device_memory_properties,
         );
 
-        self.entity.add_vertex_shader(
-            &vk_base.device,
-            "target/shaders/default-texture/texture.vert.spv",
-        );
-        self.entity.add_fragment_shader(
-            &vk_base.device,
-            "target/shaders/default-texture/texture.frag.spv",
-        );
+        self.entity
+            .add_vertex_shader(&vk_base.device, "target/shaders/text/text.vert.spv");
+        self.entity
+            .add_fragment_shader(&vk_base.device, "target/shaders/text/text.frag.spv");
 
         self.viewports = vec![vk::Viewport {
             x: 0.0,
