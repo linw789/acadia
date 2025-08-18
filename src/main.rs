@@ -1241,7 +1241,7 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::default().window_size(1024, 768);
+    let mut app = App::default().window_size(1920, 1080);
 
     let _result = event_loop.run_app(&mut app);
 }
