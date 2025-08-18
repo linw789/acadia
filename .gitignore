@@ -4,15 +4,15 @@ builds/
 
 
 # Added by cargo
-
 /target
 
 # vs code
-
 .vscode/
 
-# Miscellaneous
+# zed editor
+.zed/
 
+# Miscellaneous
 .lldbinit
 shader/*/*.spv
 
