@@ -3,9 +3,9 @@ use glam::{Mat3, Mat4, Quat, Vec3};
 #[derive(Clone, Debug, Default, Copy)]
 #[repr(C, packed)]
 pub struct Vertex {
-    pub pos: [f32; 4],
+    pub pos: [f32; 3],
     pub color: [f32; 4],
-    pub normal: [f32; 4],
+    pub normal: [f32; 3],
     pub uv: [f32; 2],
 }
 

@@ -21,7 +21,6 @@ impl Mesh {
                 mesh.positions[vi * 3 + 0],
                 mesh.positions[vi * 3 + 1],
                 mesh.positions[vi * 3 + 2],
-                1.0,
             ];
             let color = if mesh.vertex_color.len() > 0 {
                 [
@@ -38,10 +37,9 @@ impl Mesh {
                     mesh.normals[vi * 3 + 0],
                     mesh.normals[vi * 3 + 1],
                     mesh.normals[vi * 3 + 2],
-                    0.0,
                 ]
             } else {
-                [0.0; 4]
+                [0.0; 3]
             };
             let uv = if mesh.texcoords.len() > 0 {
                 [mesh.texcoords[vi * 3 + 0], mesh.texcoords[vi * 3 + 1]]

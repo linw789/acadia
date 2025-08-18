@@ -516,7 +516,7 @@ impl<'a> App<'a> {
 
         let image_extent = vk_base.swapchain.image_extent();
 
-        self.entity.add_mesh("./assets/stanford-bunny.obj");
+        self.entity.add_mesh("assets/stanford-bunny.obj");
 
         self.index_buffer = Buffer::new(
             &vk_base.device,
@@ -555,9 +555,9 @@ impl<'a> App<'a> {
         );
 
         self.entity
-            .add_vertex_shader(&vk_base.device, "target/shaders/triangle/triangle.vert.spv");
+            .add_vertex_shader(&vk_base.device, "target/shaders/default/default.vert.spv");
         self.entity
-            .add_fragment_shader(&vk_base.device, "target/shaders/triangle/triangle.frag.spv");
+            .add_fragment_shader(&vk_base.device, "target/shaders/default/default.frag.spv");
 
         self.viewports = vec![vk::Viewport {
             x: 0.0,
