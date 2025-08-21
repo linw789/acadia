@@ -25,7 +25,7 @@ use common::Vertex;
 use entity::Entity;
 use glam::{Mat4, Vec3, Vec4};
 use image::Image;
-use pipeline::{GraphicsPipelineBuilder, Pipeline};
+use pipeline::{GraphicsPipelineInfo, Pipeline};
 use std::{borrow::Cow, error::Error, f32::consts::PI, ffi, os::raw::c_char, u32, vec::Vec};
 use swapchain::Swapchain;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -447,7 +447,9 @@ struct App<'a> {
 
     viewports: Vec<vk::Viewport>,
     scissors: Vec<vk::Rect2D>,
+
     pipeline: Pipeline,
+    dev_gui_pipeline: Pipeline,
 
     frame_count: u64,
 
@@ -707,12 +709,17 @@ impl<'a> App<'a> {
                 .scissors(&self.scissors)
                 .viewports(&self.viewports);
 
-            GraphicsPipelineBuilder::default()
-                .shader_stages(shader_stage_createinfos)
-                .viewport_state(viewport_state_info)
-                .layout(pipeline_layout)
-                .surface_format(vk_base.surface_format.format)
-                .build(&vk_base.device)
+            let pipeline_infos = vec![
+                GraphicsPipelineInfo::default()
+                    .shader_stages(shader_stage_createinfos)
+                    .viewport_state(viewport_state_info)
+                    .layout(pipeline_layout)
+                    .surface_format(vk_base.surface_format.format)
+                    .build(),
+            ];
+
+            let pipelines = Pipeline::create_graphics_pipelines(&vk_base.device, &pipeline_infos);
+            pipelines[0]
         };
     }
 

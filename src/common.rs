@@ -10,6 +10,14 @@ pub struct Vertex {
 }
 
 #[derive(Clone, Debug, Default, Copy)]
+#[repr(C, packed)]
+pub struct Vertex2D {
+    pub pos: [f32; 2],
+    pub color: [f32; 4],
+    pub uv: [f32; 2],
+}
+
+#[derive(Clone, Debug, Default, Copy)]
 pub struct Transform {
     pub position: Vec3,
     pub orientation: Quat,
