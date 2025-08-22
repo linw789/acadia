@@ -39,7 +39,6 @@ pub struct GraphicsPipelineInfo<'a> {
     dynamic_state_info: Option<vk::PipelineDynamicStateCreateInfo<'a>>,
 
     surface_format: Option<vk::Format>,
-    rendering_info: Option<vk::PipelineRenderingCreateInfo<'a>>,
 
     pub layout: vk::PipelineLayout,
 }
@@ -187,11 +186,6 @@ impl<'a> GraphicsPipelineInfo<'a> {
                     offset: offset_of!(Vertex, uv) as u32,
                 },
             ];
-            // self.vertex_input_state = Some(
-            //     vk::PipelineVertexInputStateCreateInfo::default()
-            //         .vertex_binding_descriptions(self.vert_input_binding_descs.clone())
-            //         .vertex_attribute_descriptions(&self.vert_input_attrib_descs),
-            // );
         }
 
         if self.vert_input_assembly_state.is_none() {
@@ -248,28 +242,10 @@ impl<'a> GraphicsPipelineInfo<'a> {
                 alpha_blend_op: vk::BlendOp::ADD,
                 color_write_mask: vk::ColorComponentFlags::RGBA,
             }];
-            // self.color_blend_state = Some(
-            //     vk::PipelineColorBlendStateCreateInfo::default()
-            //         .logic_op(vk::LogicOp::CLEAR)
-            //         .attachments(&self.color_blend_attachment_states),
-            // );
         }
 
         if self.dynamic_state_info.is_none() {
             self.dynamic_states = vec![vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-            // self.dynamic_state_info = Some(
-            //     vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&self.dynamic_states),
-            // )
-        }
-
-        if self.rendering_info.is_none() {
-            // self.rendering_info = Some(
-            //     vk::PipelineRenderingCreateInfo::default()
-            //         .color_attachment_formats(std::slice::from_ref(
-            //             self.surface_format.as_ref().unwrap(),
-            //         ))
-            //         .depth_attachment_format(vk::Format::D16_UNORM),
-            // );
         }
 
         self
@@ -294,13 +270,13 @@ impl<'a> GraphicsPipelineInfo<'a> {
                 offset: offset_of!(Vertex2D, pos) as u32,
             },
             vk::VertexInputAttributeDescription {
-                location: 0,
+                location: 1,
                 binding: 0,
                 format: vk::Format::R32G32B32A32_SFLOAT,
                 offset: offset_of!(Vertex2D, color) as u32,
             },
             vk::VertexInputAttributeDescription {
-                location: 0,
+                location: 2,
                 binding: 0,
                 format: vk::Format::R32G32_SFLOAT,
                 offset: offset_of!(Vertex2D, uv) as u32,
@@ -348,7 +324,7 @@ impl<'a> GraphicsPipelineInfo<'a> {
 
         if self.color_blend_state.is_none() {
             self.color_blend_attachment_states = vec![vk::PipelineColorBlendAttachmentState {
-                blend_enable: 0,
+                blend_enable: 1,
                 src_color_blend_factor: vk::BlendFactor::SRC_COLOR,
                 dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_DST_COLOR,
                 color_blend_op: vk::BlendOp::ADD,
@@ -362,8 +338,6 @@ impl<'a> GraphicsPipelineInfo<'a> {
         if self.dynamic_state_info.is_none() {
             self.dynamic_states = vec![vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
         }
-
-        if self.rendering_info.is_none() {}
 
         self
     }

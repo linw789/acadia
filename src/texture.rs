@@ -1,4 +1,4 @@
-use crate::{buffer::Buffer, gui::font::FontBitmap, image::Image};
+use crate::{buffer::Buffer, image::Image};
 use ash::{Device, vk};
 use libc::{c_char, c_int, c_void};
 use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path, ptr::null};
@@ -65,21 +65,22 @@ impl Texture {
         )
     }
 
-    pub fn from_font_bitmap(
+    pub fn from_memory(
         device: &Device,
         cmd_buf: vk::CommandBuffer,
         queue: vk::Queue,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
         max_sampler_anisotropy: f32,
-        font_bitmap: &FontBitmap,
+        memory: &[u8],
+        extent: vk::Extent2D,
     ) -> Self {
         let staging_buffer = Buffer::new(
             device,
-            (font_bitmap.width * font_bitmap.height) as u64,
+            memory.len() as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
             memory_properties,
         );
-        staging_buffer.copy_data(0, &font_bitmap.pixels);
+        staging_buffer.copy_data(0, memory);
 
         Self::from_buffer(
             device,
@@ -88,10 +89,7 @@ impl Texture {
             memory_properties,
             max_sampler_anisotropy,
             vk::Format::R8_UNORM,
-            vk::Extent2D {
-                width: font_bitmap.width,
-                height: font_bitmap.height,
-            },
+            extent,
             staging_buffer,
         )
     }

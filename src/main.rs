@@ -1,6 +1,7 @@
 mod buffer;
 mod camera;
 mod common;
+mod descriptors;
 mod entity;
 mod gui;
 mod image;
@@ -22,23 +23,16 @@ use ::winit::{
 use buffer::Buffer;
 use camera::{Camera, CameraBuilder};
 use common::Vertex;
+use descriptors::Descriptors;
 use entity::Entity;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4, vec2};
+use gui::{DevGui, Text};
 use image::Image;
 use pipeline::{GraphicsPipelineInfo, Pipeline};
 use std::{borrow::Cow, error::Error, f32::consts::PI, ffi, os::raw::c_char, u32, vec::Vec};
 use swapchain::Swapchain;
+use texture::Texture;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-
-macro_rules! offset_of {
-    ($base:path, $field:ident) => {{
-        #[allow(unused_unsafe)]
-        unsafe {
-            let b: $base = std::mem::zeroed();
-            std::ptr::addr_of!(b.$field) as isize - std::ptr::addr_of!(b) as isize
-        }
-    }};
-}
 
 extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -425,17 +419,14 @@ impl Drop for VkBase {
 const MAX_FRAMES_IN_FLIGHT: u64 = 2;
 
 #[derive(Default)]
-struct App<'a> {
+struct App {
     window_width: u32,
     window_height: u32,
     window: Option<Window>,
     vk_base: Option<VkBase>,
 
-    // TODO: why do bindings need a lifetime?
-    desc_set_layout_bindings: Vec<vk::DescriptorSetLayoutBinding<'a>>,
-    desc_set_layouts: Vec<vk::DescriptorSetLayout>,
-    desc_pool: vk::DescriptorPool,
-    desc_sets: Vec<vk::DescriptorSet>,
+    desciptors: Descriptors,
+
     entity: Entity,
     index_buffer: Buffer,
     vertex_buffer: Buffer,
@@ -451,6 +442,9 @@ struct App<'a> {
     pipeline: Pipeline,
     dev_gui_pipeline: Pipeline,
 
+    dev_gui: DevGui,
+    font_texture: Texture,
+
     frame_count: u64,
 
     pub camera: Camera,
@@ -458,7 +452,7 @@ struct App<'a> {
     pub is_left_button_pressed: bool,
 }
 
-impl<'a> App<'a> {
+impl App {
     fn init_vk(&mut self) {
         self.vk_base = VkBase::new(self.window.as_ref().unwrap()).ok();
     }
@@ -572,10 +566,14 @@ impl<'a> App<'a> {
             &vk_base.device_memory_properties,
         );
 
-        self.entity
-            .add_vertex_shader(&vk_base.device, "target/shaders/text/text.vert.spv");
-        self.entity
-            .add_fragment_shader(&vk_base.device, "target/shaders/text/text.frag.spv");
+        self.entity.add_vertex_shader(
+            &vk_base.device,
+            "target/shaders/default-texture/texture.vert.spv",
+        );
+        self.entity.add_fragment_shader(
+            &vk_base.device,
+            "target/shaders/default-texture/texture.frag.spv",
+        );
 
         self.viewports = vec![vk::Viewport {
             x: 0.0,
@@ -586,140 +584,126 @@ impl<'a> App<'a> {
             max_depth: 1.0,
         }];
 
+        let screen_size = vec2(self.window_width as f32, self.window_height as f32);
+        self.dev_gui = DevGui::new(&vk_base.device, screen_size);
+
+        self.font_texture = Texture::from_memory(
+            &vk_base.device,
+            self.draw_cmd_bufs[0],
+            vk_base.present_queue,
+            &vk_base.device_memory_properties,
+            max_sampler_anisotropy,
+            &self.dev_gui.font_bitmap.pixels,
+            vk::Extent2D {
+                width: self.dev_gui.font_bitmap.width,
+                height: self.dev_gui.font_bitmap.height,
+            },
+        );
+
+        self.dev_gui.text(&Text {
+            text: "Hello World!".to_owned(),
+            start: vec2(30.0, 30.0),
+            height: 300.0,
+        });
+
+        self.dev_gui
+            .build_vertex_index_buffer(&vk_base.device, &vk_base.device_memory_properties);
+
         self.scissors = vec![image_extent.into()];
 
-        self.desc_set_layout_bindings = vec![
-            vk::DescriptorSetLayoutBinding::default()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
-            vk::DescriptorSetLayoutBinding::default()
-                .binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-        ];
+        self.desciptors = Descriptors::new(&vk_base.device);
+        self.desciptors.update_default_set(
+            &vk_base.device,
+            &self.frame_data_buffer,
+            frame_data_size,
+            self.entity.texture.as_ref().unwrap(),
+        );
+        self.desciptors
+            .update_dev_gui_set(&vk_base.device, &self.font_texture);
 
-        self.desc_set_layouts = {
-            let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
-                .bindings(&self.desc_set_layout_bindings);
-            let layout = unsafe {
-                vk_base
-                    .device
-                    .create_descriptor_set_layout(&layout_info, None)
-                    .unwrap()
-            };
-            vec![layout]
-        };
+        (self.pipeline, self.dev_gui_pipeline) = {
+            let default_pipeline_info = {
+                let pipeline_layout = unsafe {
+                    let set_layouts = [self.desciptors.set_layout(0)];
+                    let layout_createinfo =
+                        vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
+                    vk_base
+                        .device
+                        .create_pipeline_layout(&layout_createinfo, None)
+                        .unwrap()
+                };
 
-        self.desc_pool = {
-            let pool_sizes = [
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC,
-                    descriptor_count: 1,
-                },
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    descriptor_count: 1,
-                },
-            ];
+                let shader_entry_name = c"main";
+                let shader_stage_createinfos = vec![
+                    vk::PipelineShaderStageCreateInfo {
+                        module: self.entity.vertex_shader,
+                        p_name: shader_entry_name.as_ptr(),
+                        stage: vk::ShaderStageFlags::VERTEX,
+                        ..Default::default()
+                    },
+                    vk::PipelineShaderStageCreateInfo {
+                        module: self.entity.fragment_shader,
+                        p_name: shader_entry_name.as_ptr(),
+                        stage: vk::ShaderStageFlags::FRAGMENT,
+                        ..Default::default()
+                    },
+                ];
 
-            let pool_createinfo = vk::DescriptorPoolCreateInfo::default()
-                .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-                .max_sets(4 as u32)
-                .pool_sizes(&pool_sizes);
+                let viewport_state_info = vk::PipelineViewportStateCreateInfo::default()
+                    .scissors(&self.scissors)
+                    .viewports(&self.viewports);
 
-            unsafe {
-                vk_base
-                    .device
-                    .create_descriptor_pool(&pool_createinfo, None)
-                    .unwrap()
-            }
-        };
-
-        self.desc_sets = {
-            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
-                .set_layouts(&self.desc_set_layouts)
-                .descriptor_pool(self.desc_pool);
-
-            unsafe {
-                vk_base
-                    .device
-                    .allocate_descriptor_sets(&desc_set_alloc_info)
-                    .unwrap()
-            }
-        };
-
-        let desc_buf_info = vk::DescriptorBufferInfo::default()
-            .buffer(self.frame_data_buffer.buf)
-            .offset(0)
-            .range(frame_data_size as u64);
-        let desc_image_info = vk::DescriptorImageInfo::default()
-            .sampler(self.entity.texture.as_ref().unwrap().sampler)
-            .image_view(self.entity.texture.as_ref().unwrap().image.view)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-
-        let desc_writes = [
-            vk::WriteDescriptorSet::default()
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
-                .dst_set(self.desc_sets[0])
-                .dst_binding(0)
-                .dst_array_element(0)
-                .buffer_info(std::slice::from_ref(&desc_buf_info)),
-            vk::WriteDescriptorSet::default()
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .dst_set(self.desc_sets[0])
-                .dst_binding(1)
-                .dst_array_element(0)
-                .image_info(std::slice::from_ref(&desc_image_info)),
-        ];
-
-        unsafe {
-            vk_base.device.update_descriptor_sets(&desc_writes, &[]);
-        }
-
-        self.pipeline = {
-            let pipeline_layout = unsafe {
-                let layout_createinfo =
-                    vk::PipelineLayoutCreateInfo::default().set_layouts(&self.desc_set_layouts);
-                vk_base
-                    .device
-                    .create_pipeline_layout(&layout_createinfo, None)
-                    .unwrap()
-            };
-
-            let shader_entry_name = c"main";
-            let shader_stage_createinfos = vec![
-                vk::PipelineShaderStageCreateInfo {
-                    module: self.entity.vertex_shader,
-                    p_name: shader_entry_name.as_ptr(),
-                    stage: vk::ShaderStageFlags::VERTEX,
-                    ..Default::default()
-                },
-                vk::PipelineShaderStageCreateInfo {
-                    module: self.entity.fragment_shader,
-                    p_name: shader_entry_name.as_ptr(),
-                    stage: vk::ShaderStageFlags::FRAGMENT,
-                    ..Default::default()
-                },
-            ];
-
-            let viewport_state_info = vk::PipelineViewportStateCreateInfo::default()
-                .scissors(&self.scissors)
-                .viewports(&self.viewports);
-
-            let pipeline_infos = vec![
                 GraphicsPipelineInfo::default()
                     .shader_stages(shader_stage_createinfos)
                     .viewport_state(viewport_state_info)
                     .layout(pipeline_layout)
                     .surface_format(vk_base.surface_format.format)
-                    .build(),
-            ];
+                    .build()
+            };
+
+            let dev_gui_pipeline_info = {
+                let pipeline_layout = unsafe {
+                    let set_layouts = [self.desciptors.set_layout(1)];
+                    let layout_createinfo =
+                        vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
+                    vk_base
+                        .device
+                        .create_pipeline_layout(&layout_createinfo, None)
+                        .unwrap()
+                };
+
+                let shader_entry_name = c"main";
+                let shader_stage_createinfos = vec![
+                    vk::PipelineShaderStageCreateInfo {
+                        module: self.dev_gui.vertex_shader,
+                        p_name: shader_entry_name.as_ptr(),
+                        stage: vk::ShaderStageFlags::VERTEX,
+                        ..Default::default()
+                    },
+                    vk::PipelineShaderStageCreateInfo {
+                        module: self.dev_gui.fragment_shader,
+                        p_name: shader_entry_name.as_ptr(),
+                        stage: vk::ShaderStageFlags::FRAGMENT,
+                        ..Default::default()
+                    },
+                ];
+
+                let viewport_state_info = vk::PipelineViewportStateCreateInfo::default()
+                    .scissors(&self.scissors)
+                    .viewports(&self.viewports);
+
+                GraphicsPipelineInfo::default()
+                    .shader_stages(shader_stage_createinfos)
+                    .viewport_state(viewport_state_info)
+                    .layout(pipeline_layout)
+                    .surface_format(vk_base.surface_format.format)
+                    .build_dev_gui()
+            };
+
+            let pipeline_infos = [default_pipeline_info, dev_gui_pipeline_info];
 
             let pipelines = Pipeline::create_graphics_pipelines(&vk_base.device, &pipeline_infos);
-            pipelines[0]
+            (pipelines[0], pipelines[1])
         };
     }
 
@@ -728,15 +712,16 @@ impl<'a> App<'a> {
 
         unsafe {
             vk_base.device.device_wait_idle().unwrap();
-            for layout in &self.desc_set_layouts {
-                vk_base.device.destroy_descriptor_set_layout(*layout, None);
-            }
             self.pipeline.destruct(&vk_base.device);
+            self.dev_gui_pipeline.destruct(&vk_base.device);
+            self.font_texture.destruct(&vk_base.device);
+            self.dev_gui_pipeline.destruct(&vk_base.device);
             self.entity.destruct(&vk_base.device);
             self.index_buffer.destruct(&vk_base.device);
             self.vertex_buffer.destruct(&vk_base.device);
             self.frame_data_buffer.destruct(&vk_base.device);
-            vk_base.device.destroy_descriptor_pool(self.desc_pool, None);
+            self.desciptors.destruct(&vk_base.device);
+            self.dev_gui.destruct(&vk_base.device);
             for sema in &self.present_acquired_semaphores {
                 vk_base.device.destroy_semaphore(*sema, None);
             }
@@ -853,7 +838,7 @@ impl<'a> App<'a> {
                 .cmd_pipeline_barrier2(cmd_buf, &dependency_info);
         }
 
-        // Set up rendering pipeline.
+        // Draw normal stuff.
         unsafe {
             let color_attachment_info = vk::RenderingAttachmentInfo::default()
                 .image_view(present_image_view)
@@ -925,7 +910,7 @@ impl<'a> App<'a> {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline.layout,
                 0,
-                &self.desc_sets,
+                &[self.desciptors.set(0)],
                 &[(in_flight_frame_index * frame_data_size) as u32],
             );
 
@@ -937,6 +922,72 @@ impl<'a> App<'a> {
                 0,
                 1,
             );
+
+            vk_base.device.cmd_end_rendering(cmd_buf);
+        }
+
+        // Draw developer GUI.
+        unsafe {
+            let color_attachment_info = vk::RenderingAttachmentInfo::default()
+                .image_view(present_image_view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE);
+            let rendering_info = vk::RenderingInfo::default()
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: vk_base.swapchain.image_extent(),
+                })
+                .layer_count(1)
+                .color_attachments(std::slice::from_ref(&color_attachment_info));
+
+            vk_base.device.cmd_begin_rendering(cmd_buf, &rendering_info);
+
+            vk_base.device.cmd_bind_pipeline(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.dev_gui_pipeline.pipeline,
+            );
+
+            let image_extent = vk_base.swapchain.image_extent();
+            let viewport = vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: image_extent.width as f32,
+                height: image_extent.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            };
+            let scissor: vk::Rect2D = image_extent.into();
+            vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
+            vk_base.device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
+
+            vk_base.device.cmd_bind_vertex_buffers(
+                cmd_buf,
+                0,
+                &[self.dev_gui.vertex_buffer.buf],
+                &[0],
+            );
+
+            vk_base.device.cmd_bind_index_buffer(
+                cmd_buf,
+                self.dev_gui.index_buffer.buf,
+                0,
+                vk::IndexType::UINT32,
+            );
+
+            vk_base.device.cmd_bind_descriptor_sets(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.dev_gui_pipeline.layout,
+                0,
+                &[self.desciptors.set(1)],
+                &[],
+            );
+
+            vk_base
+                .device
+                .cmd_draw_indexed(cmd_buf, self.dev_gui.indices.len() as u32, 1, 0, 0, 1);
 
             vk_base.device.cmd_end_rendering(cmd_buf);
         }
@@ -1028,7 +1079,7 @@ impl<'a> App<'a> {
     }
 }
 
-impl<'a> ApplicationHandler for App<'a> {
+impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.window = Some(
             event_loop

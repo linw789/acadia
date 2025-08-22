@@ -2,30 +2,27 @@ use glam::{U16Vec2, Vec2, u16vec2, vec2};
 use libc::{c_float, c_int, c_uchar, c_ushort};
 use std::{fs, path::Path, vec::Vec};
 
-pub struct Glyph {
-    align_percentage: Vec2,
-    kerning_change: f32,
-    char_advance: f32,
-    width: u32,
-    height: u32,
-    offset_x: u32,
-    offset_y: u32,
-}
-
 #[derive(Default)]
-pub struct CharBitmapPosition {
-    top_left: U16Vec2,
-    bottom_right: U16Vec2,
-    offset: Vec2,
-    x_advance: f32,
+pub struct Glyph {
+    // The pixel position of the top-left corner of the glyph in the font bitmap.
+    pub top_left: U16Vec2,
+    // The pixel position of the bottom-right corner of the glyph in the font bitmap.
+    pub bottom_right: U16Vec2,
+    // The offset that should be applied to the position of the glyph quad rendered in screen pixel
+    // space.
+    pub offset: Vec2,
+    // The offset that should be applied to the x position of the next glyph quad rendered in
+    // screen pixel space.
+    pub x_advance: f32,
 }
 
 #[derive(Default)]
 pub struct FontBitmap {
     pub width: u32,
     pub height: u32,
+    pub base_codepoint: u32,
     pub pixels: Vec<u8>,
-    pub char_positions: Vec<CharBitmapPosition>,
+    pub glyphs: Vec<Glyph>,
 }
 
 impl FontBitmap {
@@ -34,7 +31,7 @@ impl FontBitmap {
         let ttf_data_offset: c_int = 0;
         let pixel_height: c_float = 30.0;
         let bitmap_width: c_int = 300;
-        let bitmap_height: c_int = 172;
+        let bitmap_height: c_int = 130;
         let bitmap: Vec<u8> = vec![0; (bitmap_width * bitmap_height) as usize];
         let first_char: c_int = 32;
         let num_chars: c_int = 96;
@@ -56,9 +53,9 @@ impl FontBitmap {
             assert!(result > 0);
         }
 
-        let char_positions = char_data
+        let glyphs = char_data
             .into_iter()
-            .map(|c| CharBitmapPosition {
+            .map(|c| Glyph {
                 top_left: u16vec2(c.x0, c.y0),
                 bottom_right: u16vec2(c.x1, c.y1),
                 offset: vec2(c.xoff, c.yoff),
@@ -69,8 +66,9 @@ impl FontBitmap {
         Self {
             width: bitmap_width as u32,
             height: bitmap_height as u32,
+            base_codepoint: first_char as u32,
             pixels: bitmap,
-            char_positions,
+            glyphs,
         }
     }
 }

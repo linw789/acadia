@@ -45,27 +45,25 @@ impl Entity {
         queue: vk::Queue,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
         max_sampler_anistropy: f32,
-        _texture_path: P,
+        texture_path: P,
     ) {
-        // self.texture = Some(Texture::new(
-        //     device,
-        //     cmd_buf,
-        //     queue,
-        //     memory_properties,
-        //     max_sampler_anistropy,
-        //     texture_path,
-        // ));
-
-        self.font_bitmap = FontBitmap::from_truetype("assets/fonts/LiberationSerif-Regular.ttf");
-
-        self.texture = Some(Texture::from_font_bitmap(
+        self.texture = Some(Texture::new(
             device,
             cmd_buf,
             queue,
             memory_properties,
             max_sampler_anistropy,
-            &self.font_bitmap,
+            texture_path,
         ));
+
+        // self.texture = Some(Texture::from_font_bitmap(
+        //     device,
+        //     cmd_buf,
+        //     queue,
+        //     memory_properties,
+        //     max_sampler_anistropy,
+        //     &self.font_bitmap,
+        // ));
     }
 
     pub fn destruct(&mut self, device: &Device) {
