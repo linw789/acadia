@@ -69,7 +69,7 @@ impl DevGui {
             let glyph_height = (glyph.bottom_right.y - glyph.top_left.y) as f32;
             // let glyph_width_over_height = glyph_width / glyph_height;
 
-            let quad_top_left = curr_pos + glyph.offset;
+            let quad_top_left = curr_pos + (glyph.offset * scale);
             let quad_bottom_left = quad_top_left + vec2(0.0, glyph_height * scale);
             let quad_bottom_right = quad_bottom_left + vec2(glyph_width * scale, 0.0);
             let quad_top_right = quad_bottom_right - vec2(0.0, glyph_height * scale);
