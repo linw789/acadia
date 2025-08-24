@@ -11,6 +11,6 @@ void main() {
     if (texel.r == 0.0) {
         discard;
     } else {
-        frag_color = vec4(texel.r, 0.0, 0.0, 1.0);
+        frag_color = texel;
     }
 }

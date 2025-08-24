@@ -112,8 +112,14 @@ impl Image {
 
         let view_createinfo = vk::ImageViewCreateInfo::default()
             .image(image)
-            .format(format)
             .view_type(vk::ImageViewType::TYPE_2D)
+            .format(format)
+            .components(vk::ComponentMapping { 
+                r: vk::ComponentSwizzle::R, 
+                g: vk::ComponentSwizzle::R, 
+                b: vk::ComponentSwizzle::R, 
+                a: vk::ComponentSwizzle::R, 
+            })
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,

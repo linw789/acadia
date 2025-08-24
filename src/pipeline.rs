@@ -323,16 +323,13 @@ impl<'a> GraphicsPipelineInfo<'a> {
         }
 
         if self.color_blend_state.is_none() {
-            self.color_blend_attachment_states = vec![vk::PipelineColorBlendAttachmentState {
-                blend_enable: 1,
-                src_color_blend_factor: vk::BlendFactor::SRC_COLOR,
-                dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_DST_COLOR,
-                color_blend_op: vk::BlendOp::ADD,
-                src_alpha_blend_factor: vk::BlendFactor::ZERO,
-                dst_alpha_blend_factor: vk::BlendFactor::ZERO,
-                alpha_blend_op: vk::BlendOp::ADD,
-                color_write_mask: vk::ColorComponentFlags::RGBA,
-            }];
+            self.color_blend_attachment_states = vec![vk::PipelineColorBlendAttachmentState::default()
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .color_blend_op(vk::BlendOp::ADD)
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+            ];
         }
 
         if self.dynamic_state_info.is_none() {

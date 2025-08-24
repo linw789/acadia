@@ -5,6 +5,7 @@ use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path, ptr::null};
 
 #[derive(Default)]
 pub struct Texture {
+    pub staging_buffer: Buffer,
     pub image: Image,
     pub sampler: vk::Sampler,
 }
@@ -142,7 +143,11 @@ impl Texture {
 
         let sampler = unsafe { device.create_sampler(&sampler_createinfo, None).unwrap() };
 
-        Self { image, sampler }
+        Self {
+            staging_buffer: Buffer::default(),
+            image,
+            sampler,
+        }
     }
 
     fn copy_buffer_to_image(

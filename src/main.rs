@@ -11,6 +11,7 @@ mod pipeline;
 mod swapchain;
 mod texture;
 mod util;
+mod assets;
 
 use ::ash::{Device, Entry, Instance, ext::debug_utils, khr, vk};
 use ::winit::{
@@ -603,7 +604,7 @@ impl App {
         self.dev_gui.text(&Text {
             text: "Hello World!".to_owned(),
             start: vec2(30.0, 30.0),
-            height: 300.0,
+            height: 100.0,
         });
 
         self.dev_gui
@@ -914,14 +915,14 @@ impl App {
                 &[(in_flight_frame_index * frame_data_size) as u32],
             );
 
-            vk_base.device.cmd_draw_indexed(
-                cmd_buf,
-                self.entity.mesh.indices.len() as u32,
-                1,
-                0,
-                0,
-                1,
-            );
+            // vk_base.device.cmd_draw_indexed(
+            //     cmd_buf,
+            //     self.entity.mesh.indices.len() as u32,
+            //     1,
+            //     0,
+            //     0,
+            //     1,
+            // );
 
             vk_base.device.cmd_end_rendering(cmd_buf);
         }
