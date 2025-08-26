@@ -1,6 +1,6 @@
 use ash::{Device, vk};
 use std::vec::Vec;
-use crate::{texture::Texture, buffer::Buffer};
+use crate::{assets::texture::Texture, buffer::Buffer};
 
 #[derive(Default)]
 pub struct Descriptors {

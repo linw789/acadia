@@ -72,16 +72,17 @@ impl Image {
         }
     }
 
-    pub fn new_texture_image(
+    pub fn new_image(
         device: &Device,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
         format: vk::Format,
-        extent: vk::Extent2D,
+        extent: vk::Extent3D,
+        view_components: vk::ComponentMapping,
     ) -> Self {
         let image_createinfo = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
             .format(format)
-            .extent(extent.into())
+            .extent(extent)
             .mip_levels(1)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
@@ -114,12 +115,7 @@ impl Image {
             .image(image)
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(format)
-            .components(vk::ComponentMapping { 
-                r: vk::ComponentSwizzle::R, 
-                g: vk::ComponentSwizzle::R, 
-                b: vk::ComponentSwizzle::R, 
-                a: vk::ComponentSwizzle::R, 
-            })
+            .components(view_components)
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,

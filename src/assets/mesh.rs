@@ -1,17 +1,22 @@
-use crate::common::Vertex;
-use ::tobj::{GPU_LOAD_OPTIONS, load_obj};
-use std::{convert::AsRef, fmt::Debug, path::Path, vec::Vec};
+use crate::{buffer::Buffer, common::Vertex};
+use ash::{Device, vk};
+use std::{convert::AsRef, path::Path, vec::Vec};
+use tobj::{GPU_LOAD_OPTIONS, load_obj};
 
 #[derive(Default)]
 pub struct Mesh {
-    pub indices: Vec<u32>,
-    pub vertices: Vec<Vertex>,
+    pub vertex_buffer: Buffer,
+    pub index_buffer: Buffer,
 }
 
 impl Mesh {
-    pub fn from_obj<P: AsRef<Path> + Debug>(obj_file: P) -> Self {
-        let (mesh, _material) = load_obj(&obj_file, &GPU_LOAD_OPTIONS)
-            .expect(format!("Failed to load obj file at '{:?}'.", obj_file).as_ref());
+    pub(super) fn from_obj<P: AsRef<Path>>(
+        device: &Device,
+        memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        obj_file: P,
+    ) -> Self {
+        let (mesh, _material) = load_obj(&obj_file.as_ref(), &GPU_LOAD_OPTIONS)
+            .expect(format!("Failed to load obj file at '{:?}'.", obj_file.as_ref()).as_ref());
         let mesh = &mesh[0].mesh;
 
         let vertex_count = mesh.positions.len() / 3;
@@ -54,9 +59,30 @@ impl Mesh {
             });
         }
 
+        let index_buffer = Buffer::new(
+            device,
+            (size_of::<u32>() * mesh.indices.len()) as u64,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            memory_properties,
+        );
+        index_buffer.copy_data(0, &mesh.indices);
+
+        let vertex_buffer = Buffer::new(
+            device,
+            (size_of::<Vertex>() * vertices.len()) as u64,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            memory_properties,
+        );
+        vertex_buffer.copy_data(0, &vertices);
+
         Self {
-            indices: mesh.indices.clone(),
-            vertices,
+            vertex_buffer,
+            index_buffer,
         }
+    }
+
+    pub(super) fn destruct(&mut self, device: &Device) {
+        self.index_buffer.destruct(device);
+        self.vertex_buffer.destruct(device);
     }
 }

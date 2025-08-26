@@ -1,19 +1,19 @@
-use crate::{gui::font::FontBitmap, mesh::Mesh, texture::Texture};
+use crate::{gui::font::FontBitmap, assets::{MeshId, TextureId}};
 use ash::{Device, util::read_spv, vk};
-use std::{fmt::Debug, fs::File, path::Path};
+use std::{fs::File, path::Path};
 
 #[derive(Default)]
 pub struct Entity {
-    pub mesh: Mesh,
+    pub mesh: MeshId,
     pub vertex_shader: vk::ShaderModule,
     pub fragment_shader: vk::ShaderModule,
-    pub texture: Option<Texture>,
+    pub texture: TextureId,
     pub font_bitmap: FontBitmap,
 }
 
 impl Entity {
-    pub fn add_mesh<P: AsRef<Path> + Debug>(&mut self, mesh_path: P) {
-        self.mesh = Mesh::from_obj(mesh_path);
+    pub fn add_mesh(&mut self, id: MeshId) {
+        self.mesh = id;
     }
 
     pub fn add_vertex_shader<P: AsRef<Path>>(&mut self, device: &Device, vert_spv_path: P) {
@@ -38,41 +38,14 @@ impl Entity {
         };
     }
 
-    pub fn add_texture<P: AsRef<Path>>(
-        &mut self,
-        device: &Device,
-        cmd_buf: vk::CommandBuffer,
-        queue: vk::Queue,
-        memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        max_sampler_anistropy: f32,
-        texture_path: P,
-    ) {
-        self.texture = Some(Texture::new(
-            device,
-            cmd_buf,
-            queue,
-            memory_properties,
-            max_sampler_anistropy,
-            texture_path,
-        ));
-
-        // self.texture = Some(Texture::from_font_bitmap(
-        //     device,
-        //     cmd_buf,
-        //     queue,
-        //     memory_properties,
-        //     max_sampler_anistropy,
-        //     &self.font_bitmap,
-        // ));
+    pub fn add_texture(&mut self, id: TextureId) {
+        self.texture = id;
     }
 
     pub fn destruct(&mut self, device: &Device) {
         unsafe {
             device.destroy_shader_module(self.vertex_shader, None);
             device.destroy_shader_module(self.fragment_shader, None);
-            if let Some(ref mut texture) = self.texture {
-                texture.destruct(device);
-            }
         }
         self.vertex_shader = vk::ShaderModule::null();
         self.fragment_shader = vk::ShaderModule::null();
