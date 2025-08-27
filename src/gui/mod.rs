@@ -30,7 +30,7 @@ pub struct DevGui {
 
 impl DevGui {
     pub fn new(device: &Device, screen_size: Vec2) -> Self {
-        let mut spv_file = File::open("target/shaders/text/text.vert.spv").unwrap();
+        let mut spv_file = File::open("target/shaders/devgui-text.vert.spv").unwrap();
         let spv = read_spv(&mut spv_file).unwrap();
         let vertex_shader_info = vk::ShaderModuleCreateInfo::default().code(&spv);
         let vertex_shader = unsafe {
@@ -39,7 +39,7 @@ impl DevGui {
                 .unwrap()
         };
 
-        let mut spv_file = File::open("target/shaders/text/text.frag.spv").unwrap();
+        let mut spv_file = File::open("target/shaders/devgui-text.frag.spv").unwrap();
         let spv = read_spv(&mut spv_file).unwrap();
         let fragment_shader_info = vk::ShaderModuleCreateInfo::default().code(&spv);
         let fragment_shader = unsafe {

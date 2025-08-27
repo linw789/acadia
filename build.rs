@@ -26,36 +26,43 @@ fn compile_shaders() -> Result<()> {
     visit_dirs(shaders_dir, &mut |file| {
         if let Some(ext) = file.extension() {
             match ext.to_str().unwrap() {
-                "vert" | "frag" => shaders.push(file.to_path_buf()),
+                "slang" => shaders.push(file.to_path_buf()),
                 _ => {}
             }
         }
     })?;
 
     // Compiler shader if it's been updated.
-    for src in shaders {
-        let relative_path = src.strip_prefix(shaders_dir).unwrap();
-        let mut spv_path = compiled_shaders_dir.join(relative_path);
-        spv_path.set_extension(format!(
-            "{}.spv",
-            src.extension().unwrap().to_str().unwrap()
-        ));
+    for src_file in shaders {
+        let relative_path = src_file.strip_prefix(shaders_dir).unwrap();
+        let mut vert_spv_path = compiled_shaders_dir.join(relative_path);
+        let mut frag_spv_path = vert_spv_path.clone();
+        vert_spv_path.set_extension("vert.spv");
+        frag_spv_path.set_extension("frag.spv");
 
-        if let Some(parent) = spv_path.parent() {
+        if let Some(parent) = vert_spv_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        if need_recompile(&src, &spv_path) {
-            println!("cargo:info=glslc compiling {:?}", src);
-            let status = Command::new("glslc")
-                .arg(&src)
-                .arg("-o")
-                .arg(&spv_path)
-                .status()
-                .expect("failed to spawn glslc");
+        for (spv_path, stage) in [(vert_spv_path, "vertex"), (frag_spv_path, "fragment")] {
+            if need_recompile(&src_file, &spv_path) {
+                println!("cargo:info=slangc compiling {:?}", src_file);
+                let status = Command::new("slangc")
+                    .arg(&src_file)
+                    .arg("-profile")
+                    .arg("glsl_450")
+                    .arg("-target")
+                    .arg("spirv")
+                    .arg("-entry")
+                    .arg(format!("{}_main", stage))
+                    .arg("-o")
+                    .arg(&spv_path)
+                    .status()
+                    .expect("failed to spawn slangc");
 
-            if !status.success() {
-                panic!("glslc failed for {:?} -> {:?}", src, spv_path);
+                if !status.success() {
+                    panic!("slangc failed for {:?} -> {:?}", src_file, spv_path);
+                }
             }
         }
     }

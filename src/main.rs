@@ -532,8 +532,8 @@ impl App {
             }
         });
         let shader_id_default = self.assets.add_shader(&vk_base.device, 
-            "target/shaders/default/default.vert.spv",
-            "target/shaders/default/default.frag.spv",
+            "target/shaders/default.vert.spv",
+            "target/shaders/default.frag.spv",
         );
 
         self.entity.add_mesh(mesh_id_square);
