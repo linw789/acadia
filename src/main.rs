@@ -519,8 +519,7 @@ impl App {
 
         self.assets = Assets::new(vk_base.device_memory_properties);
 
-        let mesh_id_square = self.assets.add_mesh(&vk_base.device, "assets/square.obj");
-
+        let mesh_id_square = self.assets.add_mesh(&vk_base.device, "assets/stanford-bunny.obj");
         let texture_id_checker = self.assets.add_texture_ingredient(TextureIngredient {
             src: TextureSource::FilePath(PathBuf::from("assets/textures/checker.png")),
             format: vk::Format::R8G8B8A8_UNORM,
@@ -532,11 +531,14 @@ impl App {
                 a: vk::ComponentSwizzle::ONE,
             }
         });
+        let shader_id_default = self.assets.add_shader(&vk_base.device, 
+            "target/shaders/default/default.vert.spv",
+            "target/shaders/default/default.frag.spv",
+        );
 
-        self.entity.add_texture(texture_id_checker);
         self.entity.add_mesh(mesh_id_square);
-
-        let square_mesh = self.assets.mesh(self.entity.mesh);
+        // self.entity.add_texture(texture_id_checker);
+        self.entity.add_shader(shader_id_default);
 
         self.camera = CameraBuilder::new()
             .position(Vec3::new(0.0, 0.0, 1.0))
@@ -556,15 +558,6 @@ impl App {
             frame_buffer_size as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             &vk_base.device_memory_properties,
-        );
-
-        self.entity.add_vertex_shader(
-            &vk_base.device,
-            "target/shaders/default-texture/texture.vert.spv",
-        );
-        self.entity.add_fragment_shader(
-            &vk_base.device,
-            "target/shaders/default-texture/texture.frag.spv",
         );
 
         self.viewports = vec![vk::Viewport {
@@ -639,16 +632,17 @@ impl App {
                         .unwrap()
                 };
 
+                let shader = self.assets.shader(shader_id_default);
                 let shader_entry_name = c"main";
                 let shader_stage_createinfos = vec![
                     vk::PipelineShaderStageCreateInfo {
-                        module: self.entity.vertex_shader,
+                        module: shader.vertex_shader,
                         p_name: shader_entry_name.as_ptr(),
                         stage: vk::ShaderStageFlags::VERTEX,
                         ..Default::default()
                     },
                     vk::PipelineShaderStageCreateInfo {
-                        module: self.entity.fragment_shader,
+                        module: shader.fragment_shader,
                         p_name: shader_entry_name.as_ptr(),
                         stage: vk::ShaderStageFlags::FRAGMENT,
                         ..Default::default()
@@ -718,10 +712,10 @@ impl App {
 
         unsafe {
             vk_base.device.device_wait_idle().unwrap();
+            self.assets.destruct(&vk_base.device);
             self.pipeline.destruct(&vk_base.device);
             self.dev_gui_pipeline.destruct(&vk_base.device);
             self.dev_gui_pipeline.destruct(&vk_base.device);
-            self.entity.destruct(&vk_base.device);
             self.frame_data_buffer.destruct(&vk_base.device);
             self.desciptors.destruct(&vk_base.device);
             self.dev_gui.destruct(&vk_base.device);
@@ -894,13 +888,14 @@ impl App {
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
             vk_base.device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
+            let mesh = self.assets.mesh(self.entity.mesh_id);
             vk_base
                 .device
-                .cmd_bind_vertex_buffers(cmd_buf, 0, &[self.vertex_buffer.buf], &[0]);
+                .cmd_bind_vertex_buffers(cmd_buf, 0, &[mesh.vertex_buffer.buf], &[0]);
 
             vk_base.device.cmd_bind_index_buffer(
                 cmd_buf,
-                self.index_buffer.buf,
+                mesh.index_buffer.buf,
                 0,
                 vk::IndexType::UINT32,
             );
@@ -917,14 +912,14 @@ impl App {
                 &[(in_flight_frame_index * frame_data_size) as u32],
             );
 
-            // vk_base.device.cmd_draw_indexed(
-            //     cmd_buf,
-            //     self.entity.mesh.indices.len() as u32,
-            //     1,
-            //     0,
-            //     0,
-            //     1,
-            // );
+            vk_base.device.cmd_draw_indexed(
+                cmd_buf,
+                mesh.index_count,
+                1,
+                0,
+                0,
+                1,
+            );
 
             vk_base.device.cmd_end_rendering(cmd_buf);
         }

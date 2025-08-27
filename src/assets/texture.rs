@@ -41,7 +41,7 @@ pub(super) fn bake_textures(
     ingredients: &[TextureIngredient],
 ) -> Vec<Texture> {
     // Create staging buffers for each texture ingredient.
-    let (staging_buffers, extents): (Vec<_>, Vec<_>) = ingredients
+    let (mut staging_buffers, extents): (Vec<_>, Vec<_>) = ingredients
         .iter()
         .map(|ingredient| {
             let (pixels, extent) = match &ingredient.src {
@@ -235,10 +235,8 @@ pub(super) fn bake_textures(
         device.queue_wait_idle(queue).unwrap();
     }
 
-    for buf in staging_buffers {
-        unsafe {
-            device.destroy_buffer(buf.buf, None);
-        }
+    for mut buf in staging_buffers {
+        buf.destruct(device);
     }
 
     textures

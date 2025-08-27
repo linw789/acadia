@@ -7,6 +7,7 @@ use tobj::{GPU_LOAD_OPTIONS, load_obj};
 pub struct Mesh {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
+    pub index_count: u32,
 }
 
 impl Mesh {
@@ -78,6 +79,7 @@ impl Mesh {
         Self {
             vertex_buffer,
             index_buffer,
+            index_count: mesh.indices.len() as u32,
         }
     }
 
