@@ -1,10 +1,10 @@
 pub mod font;
 
 use crate::{buffer::Buffer, common::Vertex2D};
-use ash::{Device, util::read_spv, vk};
+use ash::{Device, vk};
 use font::FontBitmap;
 use glam::{Vec2, Vec4, vec2};
-use std::{fs::File, vec::Vec};
+use std::vec::Vec;
 
 pub struct Text {
     pub text: String,
@@ -21,40 +21,17 @@ pub struct DevGui {
     pub vertices: Vec<Vertex2D>,
     pub indices: Vec<u32>,
 
-    pub vertex_shader: vk::ShaderModule,
-    pub fragment_shader: vk::ShaderModule,
-
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
 }
 
 impl DevGui {
-    pub fn new(device: &Device, screen_size: Vec2) -> Self {
-        let mut spv_file = File::open("target/shaders/devgui-text.vert.spv").unwrap();
-        let spv = read_spv(&mut spv_file).unwrap();
-        let vertex_shader_info = vk::ShaderModuleCreateInfo::default().code(&spv);
-        let vertex_shader = unsafe {
-            device
-                .create_shader_module(&vertex_shader_info, None)
-                .unwrap()
-        };
-
-        let mut spv_file = File::open("target/shaders/devgui-text.frag.spv").unwrap();
-        let spv = read_spv(&mut spv_file).unwrap();
-        let fragment_shader_info = vk::ShaderModuleCreateInfo::default().code(&spv);
-        let fragment_shader = unsafe {
-            device
-                .create_shader_module(&fragment_shader_info, None)
-                .unwrap()
-        };
-
+    pub fn new(screen_size: Vec2) -> Self {
         Self {
             font_bitmap: FontBitmap::from_truetype("assets/fonts/LiberationSerif-Regular.ttf"),
             screen_size,
             vertices: Vec::new(),
             indices: Vec::new(),
-            vertex_shader,
-            fragment_shader,
             ..Default::default()
         }
     }
@@ -149,13 +126,6 @@ impl DevGui {
     }
 
     pub fn destruct(&mut self, device: &Device) {
-        unsafe {
-            device.destroy_shader_module(self.vertex_shader, None);
-            device.destroy_shader_module(self.fragment_shader, None);
-        }
-        self.vertex_shader = vk::ShaderModule::null();
-        self.fragment_shader = vk::ShaderModule::null();
-
         self.vertex_buffer.destruct(device);
         self.index_buffer.destruct(device);
     }

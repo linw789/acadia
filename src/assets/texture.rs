@@ -41,7 +41,7 @@ pub(super) fn bake_textures(
     ingredients: &[TextureIngredient],
 ) -> Vec<Texture> {
     // Create staging buffers for each texture ingredient.
-    let (mut staging_buffers, extents): (Vec<_>, Vec<_>) = ingredients
+    let (staging_buffers, extents): (Vec<_>, Vec<_>) = ingredients
         .iter()
         .map(|ingredient| {
             let (pixels, extent) = match &ingredient.src {
@@ -67,14 +67,16 @@ pub(super) fn bake_textures(
                         ) as *const c_uchar;
                         assert!(pixels != null());
 
+                        let byte_size =
+                            texture_height * texture_width * requested_color_component_count;
+                        let pixels = std::slice::from_raw_parts(pixels, byte_size as usize);
+
                         let extent = vk::Extent3D {
                             width: texture_width as u32,
                             height: texture_height as u32,
                             depth: 1,
                         };
-                        let byte_size =
-                            texture_height * texture_width * requested_color_component_count;
-                        let pixels = std::slice::from_raw_parts(pixels, byte_size as usize);
+
                         (pixels, extent)
                     }
                 }
@@ -87,6 +89,7 @@ pub(super) fn bake_textures(
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 memory_properties,
             );
+            buffer.copy_data(0, pixels);
 
             if let TextureSource::FilePath(_) = ingredient.src {
                 unsafe {
@@ -143,6 +146,7 @@ pub(super) fn bake_textures(
             .expect("Failed to begin command buffer recording.");
 
         // Transition the texture image layout to TRANSFER_DST_OPTIMAL
+        /*
         let pre_transfer_layout_barriers: Vec<_> = textures
             .iter()
             .map(|texture| {
@@ -168,8 +172,31 @@ pub(super) fn bake_textures(
         let pre_transfer_dependencies =
             vk::DependencyInfo::default().image_memory_barriers(&pre_transfer_layout_barriers);
         device.cmd_pipeline_barrier2(cmd_buf, &pre_transfer_dependencies);
+        */
 
         for (staging_buffer, texture) in staging_buffers.iter().zip(textures.iter()) {
+            let layout_barrier = vk::ImageMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+                .src_access_mask(vk::AccessFlags2::NONE)
+                .dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
+                .dst_access_mask(vk::AccessFlags2::TRANSFER_WRITE)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(texture.image.image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let barriers = [layout_barrier];
+            let pre_transfer_dependencies =
+                vk::DependencyInfo::default().image_memory_barriers(&barriers);
+            device.cmd_pipeline_barrier2(cmd_buf, &pre_transfer_dependencies);
+
             // Copy the texture from buffer to image.
             let copy_region = vk::BufferImageCopy::default()
                 .buffer_offset(0)
@@ -191,9 +218,32 @@ pub(super) fn bake_textures(
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 std::slice::from_ref(&copy_region),
             );
+
+            let layout_barrier = vk::ImageMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::TRANSFER)
+                .src_access_mask(vk::AccessFlags2::TRANSFER_WRITE)
+                .dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
+                .dst_access_mask(vk::AccessFlags2::SHADER_READ)
+                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(texture.image.image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let barriers = [layout_barrier];
+            let post_transfer_dependencies =
+                vk::DependencyInfo::default().image_memory_barriers(&barriers);
+            device.cmd_pipeline_barrier2(cmd_buf, &post_transfer_dependencies);
         }
 
         // Transfer the texture image's layout to SHADER_READ_ONLY_OPTIMAL.
+        /*
         let post_transfer_layout_barrier: Vec<_> = textures
             .iter()
             .map(|texture| {
@@ -219,6 +269,7 @@ pub(super) fn bake_textures(
         let post_transfer_dependencies =
             vk::DependencyInfo::default().image_memory_barriers(&post_transfer_layout_barrier);
         device.cmd_pipeline_barrier2(cmd_buf, &post_transfer_dependencies);
+        */
 
         device.end_command_buffer(cmd_buf).unwrap();
 
