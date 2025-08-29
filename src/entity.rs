@@ -1,4 +1,4 @@
-use crate::assets::{MeshId, TextureId, ShaderId};
+use crate::assets::{MeshId, ShaderId, TextureId};
 
 #[derive(Default)]
 pub struct Entity {

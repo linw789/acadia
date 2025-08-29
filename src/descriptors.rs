@@ -1,6 +1,6 @@
+use crate::{assets::texture::Texture, buffer::Buffer};
 use ash::{Device, vk};
 use std::vec::Vec;
-use crate::{assets::texture::Texture, buffer::Buffer};
 
 #[derive(Default)]
 pub struct Descriptors {
@@ -54,7 +54,13 @@ impl Descriptors {
         }
     }
 
-    pub fn update_default_set(&self, device: &Device, buffer: &Buffer, buffer_size: u64, texture: &Texture) {
+    pub fn update_default_set(
+        &self,
+        device: &Device,
+        buffer: &Buffer,
+        buffer_size: u64,
+        texture: &Texture,
+    ) {
         let desc_buf_info = vk::DescriptorBufferInfo::default()
             .buffer(buffer.buf)
             .offset(0)
@@ -90,14 +96,12 @@ impl Descriptors {
             .image_view(texture.image.view)
             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
 
-        let desc_writes = [
-            vk::WriteDescriptorSet::default()
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .dst_set(self.sets[1])
-                .dst_binding(0)
-                .dst_array_element(0)
-                .image_info(std::slice::from_ref(&desc_image_info)),
-        ];
+        let desc_writes = [vk::WriteDescriptorSet::default()
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .dst_set(self.sets[1])
+            .dst_binding(0)
+            .dst_array_element(0)
+            .image_info(std::slice::from_ref(&desc_image_info))];
 
         unsafe {
             device.update_descriptor_sets(&desc_writes, &[]);

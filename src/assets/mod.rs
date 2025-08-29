@@ -1,13 +1,13 @@
 pub mod mesh;
-pub mod texture;
 pub mod shader;
+pub mod texture;
 
 use crate::gui::font::Font;
 use ash::{Device, vk};
 use mesh::Mesh;
+use shader::Shader;
 use std::{path::Path, vec::Vec};
 use texture::{Texture, TextureIngredient, bake_textures};
-use shader::Shader;
 
 #[derive(Default)]
 pub struct Assets {
@@ -43,12 +43,7 @@ impl Assets {
         (self.texture_ingredients.len() - 1) as TextureId
     }
 
-    pub fn bake_textures(
-        &mut self,
-        device: &Device,
-        cmd_buf: vk::CommandBuffer,
-        queue: vk::Queue,
-    ) {
+    pub fn bake_textures(&mut self, device: &Device, cmd_buf: vk::CommandBuffer, queue: vk::Queue) {
         self.textures = bake_textures(
             device,
             cmd_buf,
@@ -65,7 +60,12 @@ impl Assets {
         (self.meshes.len() - 1) as MeshId
     }
 
-    pub fn add_shader<P: AsRef<Path>>(&mut self, device: &Device, vert_spv: P, frag_spv: P) -> ShaderId {
+    pub fn add_shader<P: AsRef<Path>>(
+        &mut self,
+        device: &Device,
+        vert_spv: P,
+        frag_spv: P,
+    ) -> ShaderId {
         self.shaders.push(Shader::new(device, vert_spv, frag_spv));
         (self.shaders.len() - 1) as ShaderId
     }
