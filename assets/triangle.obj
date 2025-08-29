@@ -1,8 +1,0 @@
-# Triangle with vertex colors (non-standard OBJ extension)
-
-v -1.0 1.0 0.0  0.0 1.0 0.0     # Red vertex
-v 1.0 1.0 0.0  0.0 0.0 1.0   # Green vertex
-v 0.0 -1.0 0.0  1.0 0.0 0.0    # Blue vertex
-
-f 1 2 3
-
