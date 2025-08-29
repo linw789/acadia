@@ -140,8 +140,6 @@ struct VkBase {
     depth_image: Image,
 }
 
-use std::ffi::CStr;
-
 impl VkBase {
     pub fn new(window: &Window) -> Result<VkBase, Box<dyn Error>> {
         let entry = Entry::linked();
@@ -154,10 +152,6 @@ impl VkBase {
                     .unwrap()
                     .to_vec();
             extension_names.push(debug_utils::NAME.as_ptr());
-
-            for name in &extension_names {
-                println!("extension name: {:?}", unsafe { CStr::from_ptr(*name) });
-            }
 
             let appinfo = vk::ApplicationInfo::default()
                 .application_name(c"Acadia")
@@ -613,8 +607,13 @@ impl App {
 
         let mesh_id_bunny = self
             .assets
-            .add_mesh(&vk_base.device, "assets/stanford-bunny.obj");
-        let mesh_id_square = self.assets.add_mesh(&vk_base.device, "assets/square.obj");
+            .add_mesh(&vk_base.device, "assets/meshes/stanford-bunny.obj");
+        let mesh_id_square = self
+            .assets
+            .add_mesh(&vk_base.device, "assets/meshes/square.obj");
+        let mesh_id_mario = self
+            .assets
+            .add_mesh(&vk_base.device, "assets/meshes/mario.obj");
         let texture_id_checker = self.assets.add_texture_ingredient(TextureIngredient {
             src: TextureSource::FilePath(PathBuf::from("assets/textures/checker.png")),
             format: vk::Format::R8G8B8A8_SRGB,
@@ -667,7 +666,13 @@ impl App {
 
         self.entities.push(Entity {
             mesh_id: mesh_id_square,
-            texture_id: texture_id_font,
+            texture_id: texture_id_checker,
+            shader_id: shader_id_dev_gui_text,
+        });
+
+        self.entities.push(Entity {
+            mesh_id: mesh_id_mario,
+            texture_id: texture_id_checker,
             shader_id: shader_id_dev_gui_text,
         });
 
@@ -719,14 +724,14 @@ impl App {
 
         self.desciptors = Descriptors::new(&vk_base.device);
 
-        let checker_texture = self.assets.texture(texture_id_checker);
+        let texture = self.assets.texture(self.entities[2].texture_id);
         let font_texture = self.assets.texture(texture_id_font);
 
         self.desciptors.update_default_set(
             &vk_base.device,
             &self.frame_data_buffer,
             frame_data_size,
-            checker_texture,
+            texture,
         );
         self.desciptors
             .update_dev_gui_set(&vk_base.device, font_texture);
@@ -839,7 +844,7 @@ impl App {
         };
         let scissor: vk::Rect2D = image_extent.into();
 
-        let mesh = self.assets.mesh(self.entities[1].mesh_id);
+        let mesh = self.assets.mesh(self.entities[2].mesh_id);
 
         unsafe {
             vk_base.device.cmd_begin_rendering(cmd_buf, &rendering_info);
@@ -876,9 +881,16 @@ impl App {
                 &[(in_flight_frame_index * frame_data_size) as u32],
             );
 
-            vk_base
-                .device
-                .cmd_draw_indexed(cmd_buf, mesh.index_count, 1, 0, 0, 1);
+            for submesh in &mesh.submeshes {
+                vk_base.device.cmd_draw_indexed(
+                    cmd_buf,
+                    submesh.index_count,
+                    1,
+                    submesh.index_offset,
+                    submesh.vertex_offset,
+                    1,
+                );
+            }
 
             vk_base.device.cmd_end_rendering(cmd_buf);
         }
