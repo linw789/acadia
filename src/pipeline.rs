@@ -198,6 +198,7 @@ impl<'a> GraphicsPipelineInfo<'a> {
         if self.rasterization_state.is_none() {
             self.rasterization_state = Some(vk::PipelineRasterizationStateCreateInfo {
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                cull_mode: vk::CullModeFlags::BACK,
                 line_width: 1.0,
                 polygon_mode: vk::PolygonMode::FILL,
                 ..Default::default()
@@ -291,6 +292,7 @@ impl<'a> GraphicsPipelineInfo<'a> {
         if self.rasterization_state.is_none() {
             self.rasterization_state = Some(vk::PipelineRasterizationStateCreateInfo {
                 front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                cull_mode: vk::CullModeFlags::BACK,
                 line_width: 1.0,
                 polygon_mode: vk::PolygonMode::FILL,
                 ..Default::default()
