@@ -33,7 +33,7 @@ VertexOutput vertex_main(AssembledVertex assembled) {
     return output;
 }
 
-[[vk::binding(1, 0)]]
+[[vk::binding(0, 1)]]
 Sampler2D tex_sampler;
 
 struct Fragment {
@@ -48,6 +48,6 @@ Fragment fragment_main(FragmentInput fragment_input: FragmentInput) {
     float4 texel = tex_sampler.Sample(fragment_input.uv);
 
     Fragment fragment;
-    fragment.color = texel; // float4(diff * texel.rgb, 1.0);
+    fragment.color = float4(diff * texel.rgb, 1.0);
     return fragment;
 }

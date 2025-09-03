@@ -19,7 +19,7 @@ use ::winit::{
     window::{Window, WindowId},
 };
 use assets::{
-    Assets, ShaderId, TEXTURE_ID_INVALID, TextureId,
+    Assets, ShaderId,
     texture::{TextureIngredient, TextureSource},
 };
 use buffer::Buffer;
@@ -451,6 +451,9 @@ struct App {
     pub camera: Camera,
 
     pub is_left_button_pressed: bool,
+
+    texture_desc_pool: vk::DescriptorPool,
+    texture_desc_set: vk::DescriptorSet,
 }
 
 impl App {
@@ -471,7 +474,7 @@ impl App {
     fn build_default_pipeline_info(&self, shader_id: ShaderId) -> GraphicsPipelineInfo {
         let vk_base = self.vk_base.as_ref().unwrap();
         let pipeline_layout = unsafe {
-            let set_layouts = [self.desciptors.set_layout(0)];
+            let set_layouts = [self.desciptors.set_layout(0), self.desciptors.set_layout(1)];
             let layout_createinfo =
                 vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
             vk_base
@@ -613,7 +616,7 @@ impl App {
             .add_mesh(&vk_base.device, "assets/meshes/square.obj");
         let mesh_id_mario = self
             .assets
-            .add_mesh(&vk_base.device, "assets/meshes/mario.obj");
+            .add_mesh(&vk_base.device, "assets/meshes/mario-v-flipped.obj");
         let texture_id_checker = self.assets.add_texture_ingredient(TextureIngredient {
             src: TextureSource::FilePath(PathBuf::from("assets/textures/checker.png")),
             format: vk::Format::R8G8B8A8_SRGB,
@@ -625,6 +628,23 @@ impl App {
                 a: vk::ComponentSwizzle::A,
             },
         });
+        let texture_ids_mario: Vec<_> = (0..8)
+            .into_iter()
+            .map(|i| {
+                let png_name = format!("assets/textures/mario/mario-{:02}.png", i);
+                self.assets.add_texture_ingredient(TextureIngredient {
+                    src: TextureSource::FilePath(PathBuf::from(png_name)),
+                    format: vk::Format::R8G8B8A8_SRGB,
+                    max_anistropy: max_sampler_anisotropy,
+                    view_component: vk::ComponentMapping {
+                        r: vk::ComponentSwizzle::R,
+                        g: vk::ComponentSwizzle::G,
+                        b: vk::ComponentSwizzle::B,
+                        a: vk::ComponentSwizzle::A,
+                    },
+                })
+            })
+            .collect();
         let shader_id_default = self.assets.add_shader(
             &vk_base.device,
             "target/shaders/default.vert.spv",
@@ -660,24 +680,23 @@ impl App {
 
         self.entities.push(Entity {
             mesh_id: mesh_id_bunny,
-            texture_id: TEXTURE_ID_INVALID,
+            texture_ids: Vec::new(),
             shader_id: shader_id_default,
         });
 
         self.entities.push(Entity {
             mesh_id: mesh_id_square,
-            texture_id: texture_id_checker,
+            texture_ids: vec![texture_id_checker],
             shader_id: shader_id_dev_gui_text,
         });
-
         self.entities.push(Entity {
             mesh_id: mesh_id_mario,
-            texture_id: texture_id_checker,
+            texture_ids: texture_ids_mario.clone(),
             shader_id: shader_id_dev_gui_text,
         });
 
         self.camera = CameraBuilder::new()
-            .position(Vec3::new(0.0, 0.0, 1.0))
+            .position(Vec3::new(0.0, 5.0, 10.0))
             .up(Vec3::new(0.0, 1.0, 0.0))
             .lookat(Vec3::new(0.0, 0.0, -1.0))
             .fov_y(40.0 / 180.0 * std::f32::consts::PI)
@@ -724,15 +743,19 @@ impl App {
 
         self.desciptors = Descriptors::new(&vk_base.device);
 
-        let texture = self.assets.texture(self.entities[2].texture_id);
+        let checker_texture = self.assets.texture(texture_id_checker);
         let font_texture = self.assets.texture(texture_id_font);
 
         self.desciptors.update_default_set(
             &vk_base.device,
             &self.frame_data_buffer,
             frame_data_size,
-            texture,
         );
+        // self.desciptors.update_texture_set(&vk_base.device, 0, checker_texture);
+        for (i, tex_id) in texture_ids_mario.iter().enumerate() {
+            let texture = self.assets.texture(*tex_id);
+            self.desciptors.update_texture_set(&vk_base.device, i, texture);
+        }
         self.desciptors
             .update_dev_gui_set(&vk_base.device, font_texture);
 
@@ -845,6 +868,7 @@ impl App {
         let scissor: vk::Rect2D = image_extent.into();
 
         let mesh = self.assets.mesh(self.entities[2].mesh_id);
+        let texture_ids = &self.entities[2].texture_ids;
 
         unsafe {
             vk_base.device.cmd_begin_rendering(cmd_buf, &rendering_info);
@@ -881,7 +905,16 @@ impl App {
                 &[(in_flight_frame_index * frame_data_size) as u32],
             );
 
-            for submesh in &mesh.submeshes {
+            for (i, submesh) in mesh.submeshes.iter().enumerate() {
+                vk_base.device.cmd_bind_descriptor_sets(
+                    cmd_buf,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline.layout,
+                    1,
+                    &[self.desciptors.sampler_sets[i]],
+                    &[],
+                );
+
                 vk_base.device.cmd_draw_indexed(
                     cmd_buf,
                     submesh.index_count,
@@ -1162,7 +1195,7 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
-                let scale = 0.02;
+                let scale = 0.52;
                 if event.state.is_pressed() {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowLeft)

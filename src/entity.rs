@@ -1,9 +1,10 @@
 use crate::assets::{MeshId, ShaderId, TextureId};
+use std::vec::Vec;
 
 #[derive(Default)]
 pub struct Entity {
     pub mesh_id: MeshId,
-    pub texture_id: TextureId,
+    pub texture_ids: Vec<TextureId>,
     pub shader_id: ShaderId,
 }
 
@@ -17,6 +18,6 @@ impl Entity {
     }
 
     pub fn add_texture(&mut self, id: TextureId) {
-        self.texture_id = id;
+        self.texture_ids.push(id);
     }
 }

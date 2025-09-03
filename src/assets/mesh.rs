@@ -14,7 +14,6 @@ pub struct SubMesh {
 pub struct Mesh {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
-    pub index_count: u32,
     pub submeshes: Vec<SubMesh>,
 }
 
@@ -42,7 +41,7 @@ impl Mesh {
         // Value added to each vertex index by GPU before indexing into vertex buffer.
         let mut vertex_offset = 0;
         let mut index_offset = 0;
-        for Model { mesh, name } in models {
+        for Model { mesh, name: _ } in models {
             let vertex_count = mesh.positions.len() / 3;
             let index_count = mesh.indices.len();
 
@@ -115,7 +114,6 @@ impl Mesh {
         Self {
             vertex_buffer,
             index_buffer,
-            index_count: indices.len() as u32,
             submeshes,
         }
     }
