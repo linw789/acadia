@@ -7,6 +7,7 @@ mod entity;
 mod gui;
 mod image;
 mod pipeline;
+mod shader;
 mod swapchain;
 mod util;
 
@@ -19,7 +20,7 @@ use ::winit::{
     window::{Window, WindowId},
 };
 use assets::{
-    Assets, ShaderId,
+    Assets,
     texture::{TextureIngredient, TextureSource},
 };
 use buffer::Buffer;
@@ -29,9 +30,11 @@ use entity::Entity;
 use glam::{Mat4, Vec3, Vec4, vec2};
 use gui::{DevGui, Text};
 use image::Image;
-use pipeline::{GraphicsPipelineInfo, Pipeline};
+use pipeline::{create_default_graphics_pipeline, create_dev_gui_graphics_pipeline};
+use shader::{Program, Shader, load_shaders};
 use std::{
-    borrow::Cow, error::Error, f32::consts::PI, ffi, os::raw::c_char, path::PathBuf, u32, vec::Vec,
+    borrow::Cow, collections::HashMap, error::Error, f32::consts::PI, ffi, os::raw::c_char,
+    path::PathBuf, rc::Rc, u32, vec::Vec,
 };
 use swapchain::Swapchain;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -63,6 +66,10 @@ extern "system" fn vulkan_debug_callback(
         println!(
             "[{message_severity:?}:{message_type:?}] [{message_id_name} ({message_id_number})] : {message}\n",
         );
+
+        if message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::ERROR {
+            panic!("Vulkan validation failed.");
+        }
     }
 
     vk::FALSE
@@ -441,8 +448,12 @@ struct App {
 
     assets: Assets,
 
-    pipeline: Pipeline,
-    dev_gui_pipeline: Pipeline,
+    shader_set: HashMap<String, Rc<Shader>>,
+    default_program: Program,
+    dev_gui_program: Program,
+
+    default_pipeline: vk::Pipeline,
+    dev_gui_pipeline: vk::Pipeline,
 
     dev_gui: DevGui,
 
@@ -457,100 +468,18 @@ struct App {
 }
 
 impl App {
+    pub fn with_window_size(mut self, width: u32, height: u32) -> Self {
+        self.window_width = width;
+        self.window_height = height;
+        self
+    }
+
     fn init_vk(&mut self) {
         self.vk_base = VkBase::new(self.window.as_ref().unwrap()).ok();
     }
 
     fn destroy_vk(&mut self) {
         self.vk_base = None;
-    }
-
-    pub fn window_size(mut self, width: u32, height: u32) -> Self {
-        self.window_width = width;
-        self.window_height = height;
-        self
-    }
-
-    fn build_default_pipeline_info(&self, shader_id: ShaderId) -> GraphicsPipelineInfo {
-        let vk_base = self.vk_base.as_ref().unwrap();
-        let pipeline_layout = unsafe {
-            let set_layouts = [self.desciptors.set_layout(0), self.desciptors.set_layout(1)];
-            let layout_createinfo =
-                vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
-            vk_base
-                .device
-                .create_pipeline_layout(&layout_createinfo, None)
-                .unwrap()
-        };
-
-        let shader = self.assets.shader(shader_id);
-        let shader_entry_name = c"main";
-        let shader_stage_createinfos = vec![
-            vk::PipelineShaderStageCreateInfo {
-                module: shader.vertex_shader,
-                p_name: shader_entry_name.as_ptr(),
-                stage: vk::ShaderStageFlags::VERTEX,
-                ..Default::default()
-            },
-            vk::PipelineShaderStageCreateInfo {
-                module: shader.fragment_shader,
-                p_name: shader_entry_name.as_ptr(),
-                stage: vk::ShaderStageFlags::FRAGMENT,
-                ..Default::default()
-            },
-        ];
-
-        let viewport_state_info = vk::PipelineViewportStateCreateInfo::default()
-            .scissors(&self.scissors)
-            .viewports(&self.viewports);
-
-        GraphicsPipelineInfo::default()
-            .shader_stages(shader_stage_createinfos)
-            .viewport_state(viewport_state_info)
-            .layout(pipeline_layout)
-            .surface_format(vk_base.surface_format.format)
-            .build()
-    }
-
-    fn build_dev_gui_pipeline_info(&self, shader_id: ShaderId) -> GraphicsPipelineInfo {
-        let vk_base = self.vk_base.as_ref().unwrap();
-        let pipeline_layout = unsafe {
-            let set_layouts = [self.desciptors.set_layout(1)];
-            let layout_createinfo =
-                vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
-            vk_base
-                .device
-                .create_pipeline_layout(&layout_createinfo, None)
-                .unwrap()
-        };
-
-        let shader = self.assets.shader(shader_id);
-        let shader_entry_name = c"main";
-        let shader_stage_createinfos = vec![
-            vk::PipelineShaderStageCreateInfo {
-                module: shader.vertex_shader,
-                p_name: shader_entry_name.as_ptr(),
-                stage: vk::ShaderStageFlags::VERTEX,
-                ..Default::default()
-            },
-            vk::PipelineShaderStageCreateInfo {
-                module: shader.fragment_shader,
-                p_name: shader_entry_name.as_ptr(),
-                stage: vk::ShaderStageFlags::FRAGMENT,
-                ..Default::default()
-            },
-        ];
-
-        let viewport_state_info = vk::PipelineViewportStateCreateInfo::default()
-            .scissors(&self.scissors)
-            .viewports(&self.viewports);
-
-        GraphicsPipelineInfo::default()
-            .shader_stages(shader_stage_createinfos)
-            .viewport_state(viewport_state_info)
-            .layout(pipeline_layout)
-            .surface_format(vk_base.surface_format.format)
-            .build_dev_gui()
     }
 
     pub fn prepare_pipeline(&mut self) {
@@ -645,15 +574,23 @@ impl App {
                 })
             })
             .collect();
-        let shader_id_default = self.assets.add_shader(
+
+        self.shader_set = load_shaders(&vk_base.device, "target/shaders/");
+        self.default_program = Program::new(
             &vk_base.device,
-            "target/shaders/default.vert.spv",
-            "target/shaders/default.frag.spv",
+            vk::PipelineBindPoint::GRAPHICS,
+            vec![
+                Rc::clone(self.shader_set.get("default.vert").unwrap()),
+                Rc::clone(self.shader_set.get("default.frag").unwrap()),
+            ],
         );
-        let shader_id_dev_gui_text = self.assets.add_shader(
+        self.dev_gui_program = Program::new(
             &vk_base.device,
-            "target/shaders/devgui-text.vert.spv",
-            "target/shaders/devgui-text.frag.spv",
+            vk::PipelineBindPoint::GRAPHICS,
+            vec![
+                Rc::clone(self.shader_set.get("devgui-text.vert").unwrap()),
+                Rc::clone(self.shader_set.get("devgui-text.frag").unwrap()),
+            ],
         );
 
         let screen_size = vec2(self.window_width as f32, self.window_height as f32);
@@ -681,22 +618,19 @@ impl App {
         self.entities.push(Entity {
             mesh_id: mesh_id_bunny,
             texture_ids: Vec::new(),
-            shader_id: shader_id_default,
         });
 
         self.entities.push(Entity {
             mesh_id: mesh_id_square,
             texture_ids: vec![texture_id_checker],
-            shader_id: shader_id_dev_gui_text,
         });
         self.entities.push(Entity {
             mesh_id: mesh_id_mario,
             texture_ids: texture_ids_mario.clone(),
-            shader_id: shader_id_dev_gui_text,
         });
 
         self.camera = CameraBuilder::new()
-            .position(Vec3::new(0.0, 5.0, 10.0))
+            .position(Vec3::new(0.0, 0.0, 1.0))
             .up(Vec3::new(0.0, 1.0, 0.0))
             .lookat(Vec3::new(0.0, 0.0, -1.0))
             .fov_y(40.0 / 180.0 * std::f32::consts::PI)
@@ -751,23 +685,29 @@ impl App {
             &self.frame_data_buffer,
             frame_data_size,
         );
-        // self.desciptors.update_texture_set(&vk_base.device, 0, checker_texture);
+        self.desciptors.update_texture_set(&vk_base.device, 0, checker_texture);
         for (i, tex_id) in texture_ids_mario.iter().enumerate() {
             let texture = self.assets.texture(*tex_id);
-            self.desciptors.update_texture_set(&vk_base.device, i, texture);
+            self.desciptors
+                .update_texture_set(&vk_base.device, i, texture);
         }
         self.desciptors
             .update_dev_gui_set(&vk_base.device, font_texture);
 
-        (self.pipeline, self.dev_gui_pipeline) = {
-            let pipeline_infos = [
-                self.build_default_pipeline_info(shader_id_default),
-                self.build_dev_gui_pipeline_info(shader_id_dev_gui_text),
-            ];
+        let color_attachment_formats = [vk_base.surface_format.format];
+        let depth_format = vk::Format::D16_UNORM;
 
-            let pipelines = Pipeline::create_graphics_pipelines(&vk_base.device, &pipeline_infos);
-            (pipelines[0], pipelines[1])
-        };
+        self.default_pipeline = create_default_graphics_pipeline(
+            &vk_base.device,
+            &color_attachment_formats,
+            depth_format,
+            &self.default_program,
+        );
+        self.dev_gui_pipeline = create_dev_gui_graphics_pipeline(
+            &vk_base.device,
+            &color_attachment_formats,
+            &self.dev_gui_program,
+        );
     }
 
     pub fn teardown_pipeline(&mut self) {
@@ -776,12 +716,16 @@ impl App {
         unsafe {
             vk_base.device.device_wait_idle().unwrap();
             self.assets.destruct(&vk_base.device);
-            self.pipeline.destruct(&vk_base.device);
-            self.dev_gui_pipeline.destruct(&vk_base.device);
-            self.dev_gui_pipeline.destruct(&vk_base.device);
+            vk_base.device.destroy_pipeline(self.default_pipeline, None);
+            vk_base.device.destroy_pipeline(self.dev_gui_pipeline, None);
             self.frame_data_buffer.destruct(&vk_base.device);
             self.desciptors.destruct(&vk_base.device);
             self.dev_gui.destruct(&vk_base.device);
+            self.default_program.destruct(&vk_base.device);
+            self.dev_gui_program.destruct(&vk_base.device);
+            for (_name, shader) in self.shader_set.iter_mut() {
+                Rc::get_mut(shader).unwrap().destruct(&vk_base.device);
+            }
             for sema in &self.present_acquired_semaphores {
                 vk_base.device.destroy_semaphore(*sema, None);
             }
@@ -868,7 +812,6 @@ impl App {
         let scissor: vk::Rect2D = image_extent.into();
 
         let mesh = self.assets.mesh(self.entities[2].mesh_id);
-        let texture_ids = &self.entities[2].texture_ids;
 
         unsafe {
             vk_base.device.cmd_begin_rendering(cmd_buf, &rendering_info);
@@ -876,7 +819,7 @@ impl App {
             vk_base.device.cmd_bind_pipeline(
                 cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline.pipeline,
+                self.default_pipeline,
             );
 
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
@@ -898,8 +841,8 @@ impl App {
             let frame_data_size = 96; // camera_transform_size + light_data_size;
             vk_base.device.cmd_bind_descriptor_sets(
                 cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline.layout,
+                self.default_program.bind_point,
+                self.default_program.pipeline_layout,
                 0,
                 &[self.desciptors.set(0)],
                 &[(in_flight_frame_index * frame_data_size) as u32],
@@ -908,8 +851,8 @@ impl App {
             for (i, submesh) in mesh.submeshes.iter().enumerate() {
                 vk_base.device.cmd_bind_descriptor_sets(
                     cmd_buf,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline.layout,
+                    self.default_program.bind_point,
+                    self.default_program.pipeline_layout,
                     1,
                     &[self.desciptors.sampler_sets[i]],
                     &[],
@@ -966,7 +909,7 @@ impl App {
             vk_base.device.cmd_bind_pipeline(
                 cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.dev_gui_pipeline.pipeline,
+                self.dev_gui_pipeline,
             );
 
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
@@ -988,8 +931,8 @@ impl App {
 
             vk_base.device.cmd_bind_descriptor_sets(
                 cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.dev_gui_pipeline.layout,
+                self.dev_gui_program.bind_point,
+                self.dev_gui_program.pipeline_layout,
                 0,
                 &[self.desciptors.set(1)],
                 &[],
@@ -1274,7 +1217,7 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::default().window_size(1920, 1080);
+    let mut app = App::default().with_window_size(1920, 1080);
 
     let _result = event_loop.run_app(&mut app);
 }

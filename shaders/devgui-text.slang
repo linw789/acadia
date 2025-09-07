@@ -1,4 +1,3 @@
-
 struct AssembledVertex {
     float2 position;
     float4 color;
