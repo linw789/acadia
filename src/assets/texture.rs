@@ -1,8 +1,7 @@
 use crate::{buffer::Buffer, image::Image};
 use ash::{Device, vk};
 use libc::{c_char, c_int, c_uchar, c_void};
-use std::{ffi::CString, os::unix::ffi::OsStrExt, ptr::null};
-use std::{path::PathBuf, vec::Vec};
+use std::{fs, path::PathBuf, ptr::null, vec::Vec};
 
 pub enum TextureSource {
     FilePath(PathBuf),
@@ -56,10 +55,11 @@ pub(super) fn bake_textures(
                         vk::Format::R8G8B8A8_SRGB | vk::Format::R8G8B8A8_UNORM => 4,
                         _ => 0,
                     };
-                    let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+                    let image_data = fs::read(path).unwrap();
                     unsafe {
-                        let pixels = stbi_load(
-                            path.as_ptr(),
+                        let pixels = stbi_load_from_memory(
+                            image_data.as_ptr(),
+                            image_data.len() as c_int,
                             &texture_width,
                             &texture_height,
                             &original_color_component_count,
@@ -295,8 +295,9 @@ pub(super) fn bake_textures(
 
 #[link(name = "stb_image")]
 unsafe extern "C" {
-    fn stbi_load(
-        filename: *const c_char,
+    fn stbi_load_from_memory(
+        data: *const c_uchar,
+        len: c_int,
         w: *const c_int,
         h: *const c_int,
         comp_n: *const c_int,
