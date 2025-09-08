@@ -18,7 +18,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub(super) fn from_obj<P: AsRef<Path>>(
+    pub fn from_obj<P: AsRef<Path>>(
         device: &Device,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
         obj_file: P,

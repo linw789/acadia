@@ -1,4 +1,3 @@
-mod assets;
 mod buffer;
 mod camera;
 mod common;
@@ -6,9 +5,12 @@ mod descriptors;
 mod entity;
 mod gui;
 mod image;
+mod mesh;
 mod pipeline;
+mod scene;
 mod shader;
 mod swapchain;
+mod texture;
 mod util;
 
 use ::ash::{Device, Entry, Instance, ext::debug_utils, khr, vk};
@@ -19,22 +21,18 @@ use ::winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
-use assets::{
-    Assets,
-    texture::{TextureIngredient, TextureSource},
-};
 use buffer::Buffer;
 use camera::{Camera, CameraBuilder};
 use descriptors::Descriptors;
-use entity::Entity;
 use glam::{Mat4, Vec3, Vec4, vec2};
 use gui::{DevGui, Text};
 use image::Image;
 use pipeline::{create_default_graphics_pipeline, create_dev_gui_graphics_pipeline};
+use scene::{Scene, SceneLoader};
 use shader::{Program, Shader, load_shaders};
 use std::{
-    borrow::Cow, collections::HashMap, error::Error, f32::consts::PI, ffi, os::raw::c_char,
-    path::PathBuf, rc::Rc, u32, vec::Vec,
+    borrow::Cow, collections::HashMap, error::Error, f32::consts::PI, ffi, os::raw::c_char, rc::Rc,
+    u32, vec::Vec,
 };
 use swapchain::Swapchain;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -436,7 +434,6 @@ struct App {
 
     desciptors: Descriptors,
 
-    entities: Vec<Entity>,
     frame_data_buffer: Buffer,
     frame_fences: Vec<vk::Fence>,
     present_acquired_semaphores: Vec<vk::Semaphore>,
@@ -446,8 +443,6 @@ struct App {
     viewports: Vec<vk::Viewport>,
     scissors: Vec<vk::Rect2D>,
 
-    assets: Assets,
-
     shader_set: HashMap<String, Rc<Shader>>,
     default_program: Program,
     dev_gui_program: Program,
@@ -456,15 +451,13 @@ struct App {
     dev_gui_pipeline: vk::Pipeline,
 
     dev_gui: DevGui,
+    scene: Scene,
 
     frame_count: u64,
 
     pub camera: Camera,
 
     pub is_left_button_pressed: bool,
-
-    texture_desc_pool: vk::DescriptorPool,
-    texture_desc_set: vk::DescriptorSet,
 }
 
 impl App {
@@ -535,45 +528,15 @@ impl App {
             properties.limits.max_sampler_anisotropy
         };
 
-        self.assets = Assets::new(vk_base.device_memory_properties);
-
-        let mesh_id_bunny = self
-            .assets
-            .add_mesh(&vk_base.device, "assets/meshes/stanford-bunny.obj");
-        let mesh_id_square = self
-            .assets
-            .add_mesh(&vk_base.device, "assets/meshes/square.obj");
-        let mesh_id_mario = self
-            .assets
-            .add_mesh(&vk_base.device, "assets/meshes/mario-v-flipped.obj");
-        let texture_id_checker = self.assets.add_texture_ingredient(TextureIngredient {
-            src: TextureSource::FilePath(PathBuf::from("assets/textures/checker.png")),
-            format: vk::Format::R8G8B8A8_SRGB,
-            max_anistropy: max_sampler_anisotropy,
-            view_component: vk::ComponentMapping {
-                r: vk::ComponentSwizzle::R,
-                g: vk::ComponentSwizzle::G,
-                b: vk::ComponentSwizzle::B,
-                a: vk::ComponentSwizzle::A,
-            },
-        });
-        let texture_ids_mario: Vec<_> = (0..8)
-            .into_iter()
-            .map(|i| {
-                let png_name = format!("assets/textures/mario/mario-{:02}.png", i);
-                self.assets.add_texture_ingredient(TextureIngredient {
-                    src: TextureSource::FilePath(PathBuf::from(png_name)),
-                    format: vk::Format::R8G8B8A8_SRGB,
-                    max_anistropy: max_sampler_anisotropy,
-                    view_component: vk::ComponentMapping {
-                        r: vk::ComponentSwizzle::R,
-                        g: vk::ComponentSwizzle::G,
-                        b: vk::ComponentSwizzle::B,
-                        a: vk::ComponentSwizzle::A,
-                    },
-                })
-            })
-            .collect();
+        let screen_size = vec2(self.window_width as f32, self.window_height as f32);
+        self.dev_gui = DevGui::new(screen_size);
+        self.dev_gui.load_font_texture(
+            &vk_base.device,
+            &vk_base.device_memory_properties,
+            max_sampler_anisotropy,
+            self.draw_cmd_bufs[0],
+            vk_base.present_queue,
+        );
 
         self.shader_set = load_shaders(&vk_base.device, "target/shaders/");
         self.default_program = Program::new(
@@ -592,42 +555,6 @@ impl App {
                 Rc::clone(self.shader_set.get("devgui-text.frag").unwrap()),
             ],
         );
-
-        let screen_size = vec2(self.window_width as f32, self.window_height as f32);
-        self.dev_gui = DevGui::new(screen_size);
-
-        let texture_id_font = self.assets.add_texture_ingredient(TextureIngredient {
-            src: TextureSource::Memory((
-                self.dev_gui.font_bitmap.pixels.clone(),
-                vk::Extent3D {
-                    width: self.dev_gui.font_bitmap.width,
-                    height: self.dev_gui.font_bitmap.height,
-                    depth: 1,
-                },
-            )),
-            format: vk::Format::R8_UNORM,
-            max_anistropy: max_sampler_anisotropy,
-            view_component: vk::ComponentMapping {
-                r: vk::ComponentSwizzle::R,
-                g: vk::ComponentSwizzle::R,
-                b: vk::ComponentSwizzle::R,
-                a: vk::ComponentSwizzle::R,
-            },
-        });
-
-        self.entities.push(Entity {
-            mesh_id: mesh_id_bunny,
-            texture_ids: Vec::new(),
-        });
-
-        self.entities.push(Entity {
-            mesh_id: mesh_id_square,
-            texture_ids: vec![texture_id_checker],
-        });
-        self.entities.push(Entity {
-            mesh_id: mesh_id_mario,
-            texture_ids: texture_ids_mario.clone(),
-        });
 
         self.camera = CameraBuilder::new()
             .position(Vec3::new(0.0, 0.0, 1.0))
@@ -658,12 +585,6 @@ impl App {
             max_depth: 1.0,
         }];
 
-        self.assets.bake_textures(
-            &vk_base.device,
-            self.draw_cmd_bufs[0],
-            vk_base.present_queue,
-        );
-
         self.dev_gui.text(&Text {
             text: "Hello World!".to_owned(),
             start: vec2(30.0, 30.0),
@@ -675,25 +596,30 @@ impl App {
 
         self.scissors = vec![image_extent.into()];
 
-        self.desciptors = Descriptors::new(&vk_base.device);
+        self.scene = SceneLoader::new(
+            &vk_base.device,
+            &vk_base.device_memory_properties,
+            max_sampler_anisotropy,
+            self.draw_cmd_bufs[0],
+            vk_base.present_queue,
+        )
+        .load_mario();
 
-        let checker_texture = self.assets.texture(texture_id_checker);
-        let font_texture = self.assets.texture(texture_id_font);
+        self.desciptors = Descriptors::new(&vk_base.device, self.scene.max_submesh_count());
 
-        self.desciptors.update_default_set(
+        self.desciptors.update_per_frame_set(
             &vk_base.device,
             &self.frame_data_buffer,
             frame_data_size,
         );
+
         self.desciptors
-            .update_texture_set(&vk_base.device, 0, checker_texture);
-        for (i, tex_id) in texture_ids_mario.iter().enumerate() {
-            let texture = self.assets.texture(*tex_id);
+            .update_dev_gui_sampler_set(&vk_base.device, &self.dev_gui.textures[0]);
+
+        for (i, texture) in self.scene.textures.iter().enumerate() {
             self.desciptors
-                .update_texture_set(&vk_base.device, i, texture);
+                .update_sampler_set(&vk_base.device, i, texture);
         }
-        self.desciptors
-            .update_dev_gui_set(&vk_base.device, font_texture);
 
         let color_attachment_formats = [vk_base.surface_format.format];
         let depth_format = vk::Format::D16_UNORM;
@@ -716,7 +642,7 @@ impl App {
 
         unsafe {
             vk_base.device.device_wait_idle().unwrap();
-            self.assets.destruct(&vk_base.device);
+            self.scene.destruct(&vk_base.device);
             vk_base.device.destroy_pipeline(self.default_pipeline, None);
             vk_base.device.destroy_pipeline(self.dev_gui_pipeline, None);
             self.frame_data_buffer.destruct(&vk_base.device);
@@ -812,8 +738,6 @@ impl App {
         };
         let scissor: vk::Rect2D = image_extent.into();
 
-        let mesh = self.assets.mesh(self.entities[2].mesh_id);
-
         unsafe {
             vk_base.device.cmd_begin_rendering(cmd_buf, &rendering_info);
 
@@ -826,47 +750,51 @@ impl App {
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
             vk_base.device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
-            vk_base
-                .device
-                .cmd_bind_vertex_buffers(cmd_buf, 0, &[mesh.vertex_buffer.buf], &[0]);
+            for entity in &self.scene.entities {
+                let mesh = &self.scene.meshes[entity.mesh_index as usize];
+                vk_base
+                    .device
+                    .cmd_bind_vertex_buffers(cmd_buf, 0, &[mesh.vertex_buffer.buf], &[0]);
 
-            vk_base.device.cmd_bind_index_buffer(
-                cmd_buf,
-                mesh.index_buffer.buf,
-                0,
-                vk::IndexType::UINT32,
-            );
+                vk_base.device.cmd_bind_index_buffer(
+                    cmd_buf,
+                    mesh.index_buffer.buf,
+                    0,
+                    vk::IndexType::UINT32,
+                );
 
-            // let camera_transform_size = size_of::<Mat4>();
-            // let light_data_size = size_of::<Vec4>();
-            let frame_data_size = 96; // camera_transform_size + light_data_size;
-            vk_base.device.cmd_bind_descriptor_sets(
-                cmd_buf,
-                self.default_program.bind_point,
-                self.default_program.pipeline_layout,
-                0,
-                &[self.desciptors.set(0)],
-                &[(in_flight_frame_index * frame_data_size) as u32],
-            );
-
-            for (i, submesh) in mesh.submeshes.iter().enumerate() {
+                // let camera_transform_size = size_of::<Mat4>();
+                // let light_data_size = size_of::<Vec4>();
+                let frame_data_size = 96; // camera_transform_size + light_data_size;
                 vk_base.device.cmd_bind_descriptor_sets(
                     cmd_buf,
                     self.default_program.bind_point,
                     self.default_program.pipeline_layout,
-                    1,
-                    &[self.desciptors.sampler_sets[i]],
-                    &[],
+                    0,
+                    &[self.desciptors.per_frame_data_set()],
+                    &[(in_flight_frame_index * frame_data_size) as u32],
                 );
 
-                vk_base.device.cmd_draw_indexed(
-                    cmd_buf,
-                    submesh.index_count,
-                    1,
-                    submesh.index_offset,
-                    submesh.vertex_offset,
-                    1,
-                );
+                for (submesh, texture_i) in mesh.submeshes.iter().zip(entity.texture_indices.iter())
+                {
+                    vk_base.device.cmd_bind_descriptor_sets(
+                        cmd_buf,
+                        self.default_program.bind_point,
+                        self.default_program.pipeline_layout,
+                        1,
+                        &[self.desciptors.sampler_set(*texture_i as usize)],
+                        &[],
+                    );
+
+                    vk_base.device.cmd_draw_indexed(
+                        cmd_buf,
+                        submesh.index_count,
+                        1,
+                        submesh.index_offset,
+                        submesh.vertex_offset,
+                        1,
+                    );
+                }
             }
 
             vk_base.device.cmd_end_rendering(cmd_buf);
@@ -935,7 +863,7 @@ impl App {
                 self.dev_gui_program.bind_point,
                 self.dev_gui_program.pipeline_layout,
                 0,
-                &[self.desciptors.set(1)],
+                &[self.desciptors.dev_gui_sampler_set()],
                 &[],
             );
 
