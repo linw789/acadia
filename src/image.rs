@@ -13,11 +13,12 @@ impl Image {
         device: &Device,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         extent: vk::Extent2D,
+        format: vk::Format,
     ) -> Self {
         let (image, view, memory) = unsafe {
             let depth_image_createinfo = vk::ImageCreateInfo::default()
                 .image_type(vk::ImageType::TYPE_2D)
-                .format(vk::Format::D16_UNORM)
+                .format(format)
                 .extent(extent.into())
                 .mip_levels(1)
                 .array_layers(1)

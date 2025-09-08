@@ -136,6 +136,8 @@ struct VkBase {
     surface: vk::SurfaceKHR,
     surface_format: vk::SurfaceFormatKHR,
 
+    depth_format: vk::Format,
+
     pub swapchain: Swapchain,
     present_mode: vk::PresentModeKHR,
     present_image_views: Vec<vk::ImageView>,
@@ -279,6 +281,8 @@ impl VkBase {
         };
         let surface_format = pick_present_image_format(&surface_formats);
 
+        let depth_format = vk::Format::D32_SFLOAT;
+
         let surface_capabilities = unsafe {
             surface_loader
                 .get_physical_device_surface_capabilities(physical_device, surface)
@@ -327,7 +331,7 @@ impl VkBase {
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
         let depth_image =
-            Image::new_depth_image(&device, &device_memory_properties, swapchain.image_extent());
+            Image::new_depth_image(&device, &device_memory_properties, swapchain.image_extent(), depth_format);
 
         Ok(Self {
             inst,
@@ -342,6 +346,8 @@ impl VkBase {
 
             surface,
             surface_format,
+
+            depth_format,
 
             swapchain,
             present_mode,
@@ -401,6 +407,7 @@ impl VkBase {
             &self.device,
             &device_memory_properties,
             self.swapchain.image_extent(),
+            self.depth_format,
         );
     }
 }
@@ -622,17 +629,17 @@ impl App {
         }
 
         let color_attachment_formats = [vk_base.surface_format.format];
-        let depth_format = vk::Format::D16_UNORM;
 
         self.default_pipeline = create_default_graphics_pipeline(
             &vk_base.device,
             &color_attachment_formats,
-            depth_format,
+            vk_base.depth_format,
             &self.default_program,
         );
         self.dev_gui_pipeline = create_dev_gui_graphics_pipeline(
             &vk_base.device,
             &color_attachment_formats,
+            vk_base.depth_format,
             &self.dev_gui_program,
         );
     }

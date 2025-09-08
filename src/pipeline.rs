@@ -82,6 +82,7 @@ pub fn create_default_graphics_pipeline(
 pub fn create_dev_gui_graphics_pipeline(
     device: &Device,
     color_attachment_formats: &[vk::Format],
+    depth_format: vk::Format,
     program: &Program,
 ) -> vk::Pipeline {
     let vertex_binding_descs = [vk::VertexInputBindingDescription::default()
@@ -133,7 +134,7 @@ pub fn create_dev_gui_graphics_pipeline(
         &vertex_input_state,
         false,
         color_attachment_formats,
-        vk::Format::D16_UNORM,
+        depth_format,
         &color_blend_state,
         program,
     )
