@@ -66,7 +66,7 @@ impl Swapchain {
         old_swapchain.is_some()
     }
 
-    /// Create a swapchain if non exists. Create a new swapchain is the window_size doesn't match the one
+    /// Create a swapchain if non exists. Create a new swapchain if the window_size doesn't match the one
     /// in the existing swapchain, and return the vk-handle to the old swapchain.
     fn create(
         &mut self,
@@ -76,7 +76,8 @@ impl Swapchain {
         present_mode: vk::PresentModeKHR,
         image_extent: vk::Extent2D,
     ) -> Option<vk::SwapchainKHR> {
-        if self.image_extent == image_extent {
+        if self.image_extent == image_extent || image_extent.width == 0 || image_extent.height == 0
+        {
             return None;
         }
 
@@ -96,9 +97,20 @@ impl Swapchain {
         let desired_image_count =
             u32::min(surface_capabilities.min_image_count + 1, max_image_count);
 
+        let min_image_extent = surface_capabilities.min_image_extent;
+        let max_image_extent = surface_capabilities.max_image_extent;
         self.image_extent = match surface_capabilities.current_extent.width {
             u32::MAX => image_extent,
-            _ => surface_capabilities.current_extent,
+            _ => vk::Extent2D {
+                width: u32::min(
+                    u32::max(min_image_extent.width, image_extent.width),
+                    max_image_extent.width,
+                ),
+                height: u32::min(
+                    u32::max(min_image_extent.height, image_extent.height),
+                    max_image_extent.height,
+                ),
+            },
         };
 
         let pre_transform = if surface_capabilities
@@ -115,7 +127,7 @@ impl Swapchain {
             .min_image_count(desired_image_count)
             .image_color_space(surface_format.color_space)
             .image_format(surface_format.format)
-            .image_extent(image_extent)
+            .image_extent(self.image_extent)
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(pre_transform)

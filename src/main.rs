@@ -685,7 +685,8 @@ impl App {
             &self.frame_data_buffer,
             frame_data_size,
         );
-        self.desciptors.update_texture_set(&vk_base.device, 0, checker_texture);
+        self.desciptors
+            .update_texture_set(&vk_base.device, 0, checker_texture);
         for (i, tex_id) in texture_ids_mario.iter().enumerate() {
             let texture = self.assets.texture(*tex_id);
             self.desciptors
@@ -1179,7 +1180,10 @@ impl ApplicationHandler for App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(size) => {
-                println!("[DEBUG LINW] resized requested");
+                println!(
+                    "[DEBUG LINW] resized requested: (w: {}, h: {})",
+                    size.width, size.height
+                );
                 if let Some(vk_base) = self.vk_base.as_mut() {
                     vk_base.recreate_swapchain(vk::Extent2D {
                         width: size.width,
