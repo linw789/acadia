@@ -186,7 +186,7 @@ fn create_graphics_pipeline(
     let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
         .depth_test_enable(depth_enabled)
         .depth_write_enable(depth_enabled)
-        .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
+        .depth_compare_op(vk::CompareOp::GREATER);
 
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
     let dynamic_state =

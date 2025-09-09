@@ -124,10 +124,10 @@ impl Camera {
         v.inverse()
     }
 
-    /// Return the perspective matrix with z_near and infinity mapped to [0, 1].
+    /// Return the perspective matrix with z_near and infinity mapped to [1, 0].
     /// `aspect_ratio` is the ratio of viewport's width over height.
     pub fn perspective_matrix(&self, aspect_ratio: f32) -> Mat4 {
-        Mat4::perspective_infinite_rh(self.fov_y, aspect_ratio, self.near_z)
+        Mat4::perspective_infinite_reverse_rh(self.fov_y, aspect_ratio, self.near_z)
     }
 }
 
