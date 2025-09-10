@@ -2,12 +2,19 @@ use crate::{buffer::Buffer, common::Vertex};
 use ash::{Device, vk};
 use std::{convert::AsRef, path::Path, vec::Vec};
 use tobj::{GPU_LOAD_OPTIONS, Model, load_obj};
+use glam::Vec3;
+
+pub struct Bounds {
+    pub min: Vec3,
+    pub max: Vec3,
+}
 
 #[derive(Default)]
 pub struct SubMesh {
     pub index_count: u32,
     pub index_offset: u32,
     pub vertex_offset: i32,
+    pub bounds: Bounds,
 }
 
 #[derive(Default)]
@@ -45,12 +52,19 @@ impl Mesh {
             let vertex_count = mesh.positions.len() / 3;
             let index_count = mesh.indices.len();
 
+            let mut bounds = Bounds { min: Vec3::MAX, max: Vec3::MIN };
+
             for vi in 0..vertex_count {
                 let pos = [
                     mesh.positions[vi * 3 + 0],
                     mesh.positions[vi * 3 + 1],
                     mesh.positions[vi * 3 + 2],
                 ];
+
+                let posv3: Vec3 = pos.clone().into();
+                bounds.min = bounds.min.min(posv3);
+                bounds.max = bounds.max.max(posv3);
+
                 let color = if mesh.vertex_color.len() > 0 {
                     [
                         mesh.vertex_color[vi * 3 + 0],
@@ -89,6 +103,7 @@ impl Mesh {
                 index_count: index_count as u32,
                 index_offset,
                 vertex_offset,
+                bounds,
             });
 
             vertex_offset += vertex_count as i32;
@@ -121,5 +136,21 @@ impl Mesh {
     pub(super) fn destruct(&mut self, device: &Device) {
         self.index_buffer.destruct(device);
         self.vertex_buffer.destruct(device);
+    }
+}
+
+impl Bounds {
+    pub fn extend(&mut self, other: &Bounds) {
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
+    }
+}
+
+impl Default for Bounds {
+    fn default() -> Self {
+        Self {
+            min: Vec3::ZERO,
+            max: Vec3::ZERO,
+        }
     }
 }

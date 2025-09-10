@@ -1,5 +1,3 @@
-use glam::{Mat3, Mat4, Quat, Vec3};
-
 #[derive(Clone, Debug, Default, Copy)]
 #[repr(C, packed)]
 pub struct Vertex {

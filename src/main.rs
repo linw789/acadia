@@ -566,15 +566,6 @@ impl App {
             ],
         );
 
-        self.camera = CameraBuilder::new()
-            .position(Vec3::new(0.0, 0.0, 1.0))
-            .up(Vec3::new(0.0, 1.0, 0.0))
-            .lookat(Vec3::new(0.0, 0.0, -1.0))
-            .fov_y(40.0 / 180.0 * std::f32::consts::PI)
-            .near_z(0.1)
-            .build()
-            .unwrap();
-
         // let camera_transform_size = size_of::<Mat4>();
         // let light_data_size = size_of::<Vec4>();
         let frame_data_size = 96; // camera_transform_size + light_data_size;
@@ -614,6 +605,26 @@ impl App {
             vk_base.present_queue,
         )
         .load_shadow_test();
+
+        let scene_bounds = self.scene.bounding_box();
+        let camera_pos = Vec3::new(
+            (scene_bounds.max.x + scene_bounds.min.x) / 2.0,
+            (scene_bounds.max.y + scene_bounds.min.y) / 2.0,
+            scene_bounds.max.z * 1.3,
+        );
+        let scene_center = Vec3::new(
+            (scene_bounds.max.x + scene_bounds.min.x) / 2.0,
+            (scene_bounds.max.y + scene_bounds.min.y) / 2.0,
+            (scene_bounds.max.z + scene_bounds.min.z) / 2.0,
+        );
+        self.camera = CameraBuilder::new()
+            .position(camera_pos)
+            .up(Vec3::new(0.0, 1.0, 0.0))
+            .lookat(scene_center - camera_pos)
+            .fov_y(40.0 / 180.0 * std::f32::consts::PI)
+            .near_z(0.1)
+            .build()
+            .unwrap();
 
         self.desciptors = Descriptors::new(&vk_base.device, self.scene.textures.len());
 
