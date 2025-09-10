@@ -65,6 +65,48 @@ impl<'a> SceneLoader<'a> {
         }
     }
 
+    pub fn load_square(self) -> Scene {
+        let mut meshes = Vec::new();
+        meshes.push(Mesh::from_obj(
+            self.device,
+            self.device_memory_properties,
+            "assets/meshes/square.obj",
+        ));
+
+        let textures = {
+            let texture_infos = vec![TextureInfo {
+                src: TextureSource::FilePath(PathBuf::from("assets/textures/checker.png")),
+                format: vk::Format::R8G8B8A8_SRGB,
+                max_sampler_anisotropy: self.max_sampler_anisotropy,
+                view_component: vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::R,
+                    g: vk::ComponentSwizzle::G,
+                    b: vk::ComponentSwizzle::B,
+                    a: vk::ComponentSwizzle::A,
+                },
+            }];
+
+            Texture::load_textures(
+                self.device,
+                self.cmd_buf,
+                self.queue,
+                self.device_memory_properties,
+                &texture_infos,
+            )
+        };
+
+        let entities = vec![Entity {
+            mesh_index: 0,
+            texture_indices: vec![0],
+        }];
+
+        Scene {
+            entities,
+            meshes,
+            textures,
+        }
+    }
+
     pub fn load_mario(self) -> Scene {
         let mut meshes = Vec::new();
         meshes.push(Mesh::from_obj(

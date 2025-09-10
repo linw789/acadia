@@ -610,7 +610,7 @@ impl App {
             self.draw_cmd_bufs[0],
             vk_base.present_queue,
         )
-        .load_mario();
+        .load_square();
 
         self.desciptors = Descriptors::new(&vk_base.device, self.scene.max_submesh_count());
 
