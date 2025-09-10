@@ -2,7 +2,6 @@ mod buffer;
 mod camera;
 mod common;
 mod descriptors;
-mod entity;
 mod gui;
 mod image;
 mod mesh;
