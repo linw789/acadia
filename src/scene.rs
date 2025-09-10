@@ -38,14 +38,6 @@ impl Scene {
         self.meshes.clear();
         self.entities.clear();
     }
-
-    pub fn max_submesh_count(&self) -> usize {
-        self.meshes
-            .iter()
-            .map(|mesh| mesh.submeshes.len())
-            .max()
-            .unwrap_or(0)
-    }
 }
 
 impl<'a> SceneLoader<'a> {
@@ -144,6 +136,58 @@ impl<'a> SceneLoader<'a> {
         let entities = vec![Entity {
             mesh_index: 0,
             texture_indices: (0..textures.len()).map(|x| x as u32).collect(),
+        }];
+
+        Scene {
+            entities,
+            meshes,
+            textures,
+        }
+    }
+
+    pub fn load_shadow_test(self) -> Scene {
+        let mut meshes = Vec::new();
+        meshes.push(Mesh::from_obj(
+            self.device,
+            self.device_memory_properties,
+            "assets/meshes/shadow-test.obj",
+        ));
+
+        let textures = {
+            // Create a dummy texture for meshes that don't have textures.
+            let dummy_texture_data: [u8; 4] = [186, 193, 196, 255];
+
+            let texture_infos = vec![TextureInfo {
+                src: TextureSource::Memory((
+                    &dummy_texture_data,
+                    vk::Extent3D {
+                        width: 1,
+                        height: 1,
+                        depth: 1,
+                    },
+                )),
+                format: vk::Format::R8G8B8A8_SRGB,
+                max_sampler_anisotropy: 1.0,
+                view_component: vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::R,
+                    g: vk::ComponentSwizzle::G,
+                    b: vk::ComponentSwizzle::B,
+                    a: vk::ComponentSwizzle::A,
+                },
+            }];
+
+            Texture::load_textures(
+                self.device,
+                self.cmd_buf,
+                self.queue,
+                self.device_memory_properties,
+                &texture_infos,
+            )
+        };
+
+        let entities = vec![Entity {
+            mesh_index: 0,
+            texture_indices: vec![0, 0, 0, 0],
         }];
 
         Scene {

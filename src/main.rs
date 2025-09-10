@@ -330,8 +330,12 @@ impl VkBase {
         let device_memory_properties =
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
-        let depth_image =
-            Image::new_depth_image(&device, &device_memory_properties, swapchain.image_extent(), depth_format);
+        let depth_image = Image::new_depth_image(
+            &device,
+            &device_memory_properties,
+            swapchain.image_extent(),
+            depth_format,
+        );
 
         Ok(Self {
             inst,
@@ -610,9 +614,9 @@ impl App {
             self.draw_cmd_bufs[0],
             vk_base.present_queue,
         )
-        .load_square();
+        .load_shadow_test();
 
-        self.desciptors = Descriptors::new(&vk_base.device, self.scene.max_submesh_count());
+        self.desciptors = Descriptors::new(&vk_base.device, self.scene.textures.len());
 
         self.desciptors.update_per_frame_set(
             &vk_base.device,

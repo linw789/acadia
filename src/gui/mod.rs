@@ -1,6 +1,10 @@
 pub mod font;
 
-use crate::{buffer::Buffer, common::Vertex2D, texture::{Texture, TextureSource, TextureInfo}};
+use crate::{
+    buffer::Buffer,
+    common::Vertex2D,
+    texture::{Texture, TextureInfo, TextureSource},
+};
 use ash::{Device, vk};
 use font::FontBitmap;
 use glam::{Vec2, Vec4, vec2};
@@ -44,12 +48,12 @@ impl DevGui {
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         max_sampler_anisotropy: f32,
         cmd_buf: vk::CommandBuffer,
-        queue: vk::Queue,)
-    {
+        queue: vk::Queue,
+    ) {
         self.textures = {
             let texture_infos = vec![TextureInfo {
                 src: TextureSource::Memory((
-                    self.font_bitmap.pixels.clone(),
+                    &self.font_bitmap.pixels,
                     vk::Extent3D {
                         width: self.font_bitmap.width,
                         height: self.font_bitmap.height,

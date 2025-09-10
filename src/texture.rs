@@ -3,13 +3,13 @@ use ash::{Device, vk};
 use libc::{c_char, c_int, c_uchar, c_void};
 use std::{fs, path::PathBuf, ptr::null, vec::Vec};
 
-pub enum TextureSource {
+pub enum TextureSource<'a> {
     FilePath(PathBuf),
-    Memory((Vec<u8>, vk::Extent3D)),
+    Memory((&'a [u8], vk::Extent3D)),
 }
 
-pub struct TextureInfo {
-    pub src: TextureSource,
+pub struct TextureInfo<'a> {
+    pub src: TextureSource<'a>,
     pub format: vk::Format,
     pub max_sampler_anisotropy: f32,
     pub view_component: vk::ComponentMapping,
@@ -23,7 +23,7 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub(super) fn destruct(&mut self, device: &Device) {
+    pub fn destruct(&mut self, device: &Device) {
         self.image.destruct(device);
         unsafe {
             device.destroy_sampler(self.sampler, None);
@@ -193,7 +193,6 @@ impl Texture {
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                     std::slice::from_ref(&copy_region),
                 );
-
             }
 
             // Transfer the texture image's layout to SHADER_READ_ONLY_OPTIMAL.

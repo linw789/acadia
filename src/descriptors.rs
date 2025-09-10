@@ -1,4 +1,4 @@
-use crate::{texture::Texture, buffer::Buffer};
+use crate::{buffer::Buffer, texture::Texture};
 use ash::{Device, vk};
 use std::vec::Vec;
 
@@ -47,8 +47,8 @@ impl Descriptors {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)];
 
-                let layout_info =
-                    vk::DescriptorSetLayoutCreateInfo::default().bindings(&desc_set_layout_bindings);
+                let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
+                    .bindings(&desc_set_layout_bindings);
                 unsafe {
                     device
                         .create_descriptor_set_layout(&layout_info, None)
@@ -63,8 +63,8 @@ impl Descriptors {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)];
 
-                let layout_info =
-                    vk::DescriptorSetLayoutCreateInfo::default().bindings(&desc_set_layout_bindings);
+                let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
+                    .bindings(&desc_set_layout_bindings);
                 unsafe {
                     device
                         .create_descriptor_set_layout(&layout_info, None)
@@ -117,39 +117,11 @@ impl Descriptors {
     }
 
     pub fn update_dev_gui_sampler_set(&self, device: &Device, texture: &Texture) {
-        let desc_image_info = vk::DescriptorImageInfo::default()
-            .sampler(texture.sampler)
-            .image_view(texture.image.view)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-
-        let desc_writes = [vk::WriteDescriptorSet::default()
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .dst_set(self.sets[DEV_GUI_SAMPLER_SET_INDEX])
-            .dst_binding(0)
-            .dst_array_element(0)
-            .image_info(std::slice::from_ref(&desc_image_info))];
-
-        unsafe {
-            device.update_descriptor_sets(&desc_writes, &[]);
-        }
+        self.update_sampler_set_at(device, DEV_GUI_SAMPLER_SET_INDEX, texture);
     }
 
     pub fn update_sampler_set(&self, device: &Device, index: usize, texture: &Texture) {
-        let desc_image_info = vk::DescriptorImageInfo::default()
-            .sampler(texture.sampler)
-            .image_view(texture.image.view)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-
-        let desc_writes = [vk::WriteDescriptorSet::default()
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .dst_set(self.sets[SAMPLER_SET_INDEX_START + index])
-            .dst_binding(0)
-            .dst_array_element(0)
-            .image_info(std::slice::from_ref(&desc_image_info))];
-
-        unsafe {
-            device.update_descriptor_sets(&desc_writes, &[]);
-        }
+        self.update_sampler_set_at(device, SAMPLER_SET_INDEX_START + index, texture);
     }
 
     pub fn per_frame_data_set(&self) -> vk::DescriptorSet {
@@ -164,24 +136,6 @@ impl Descriptors {
         self.sets[SAMPLER_SET_INDEX_START + index]
     }
 
-    // pub fn update_dev_gui_set(&self, device: &Device, texture: &Texture) {
-    //     let desc_image_info = vk::DescriptorImageInfo::default()
-    //         .sampler(texture.sampler)
-    //         .image_view(texture.image.view)
-    //         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-
-    //     let desc_writes = [vk::WriteDescriptorSet::default()
-    //         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-    //         .dst_set(self.sets[1])
-    //         .dst_binding(0)
-    //         .dst_array_element(0)
-    //         .image_info(std::slice::from_ref(&desc_image_info))];
-
-    //     unsafe {
-    //         device.update_descriptor_sets(&desc_writes, &[]);
-    //     }
-    // }
-
     pub fn destruct(&mut self, device: &Device) {
         unsafe {
             device.destroy_descriptor_pool(self.pool, None);
@@ -190,5 +144,23 @@ impl Descriptors {
             }
         }
         self.sets.clear();
+    }
+
+    fn update_sampler_set_at(&self, device: &Device, index: usize, texture: &Texture) {
+        let desc_image_info = vk::DescriptorImageInfo::default()
+            .sampler(texture.sampler)
+            .image_view(texture.image.view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+
+        let desc_writes = [vk::WriteDescriptorSet::default()
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .dst_set(self.sets[index])
+            .dst_binding(0)
+            .dst_array_element(0)
+            .image_info(std::slice::from_ref(&desc_image_info))];
+
+        unsafe {
+            device.update_descriptor_sets(&desc_writes, &[]);
+        }
     }
 }
