@@ -1,3 +1,4 @@
+use regex::Regex;
 use std::{fs, io::Result, path::Path, process::Command, time::SystemTime};
 
 fn main() -> Result<()> {
@@ -32,20 +33,30 @@ fn compile_shaders() -> Result<()> {
         }
     })?;
 
-    // Compiler shader if it's been updated.
+    // Compile shader if it's been updated.
     for src_file in shaders {
         let relative_path = src_file.strip_prefix(shaders_dir).unwrap();
-        let mut vert_spv_path = compiled_shaders_dir.join(relative_path);
-        let mut frag_spv_path = vert_spv_path.clone();
-        vert_spv_path.set_extension("vert.spv");
-        frag_spv_path.set_extension("frag.spv");
+        let mut vert_spv_out_path = compiled_shaders_dir.join(relative_path);
+        let mut frag_spv_out_path = vert_spv_out_path.clone();
+        vert_spv_out_path.set_extension("vert.spv");
+        frag_spv_out_path.set_extension("frag.spv");
 
-        if let Some(parent) = vert_spv_path.parent() {
+        if let Some(parent) = vert_spv_out_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        for (spv_path, stage) in [(vert_spv_path, "vertex"), (frag_spv_path, "fragment")] {
-            if need_recompile(&src_file, &spv_path) {
+        let src_file_str = fs::read_to_string(&src_file).unwrap();
+
+        for (spv_path, stage) in [
+            (vert_spv_out_path, "vertex"),
+            (frag_spv_out_path, "fragment"),
+        ] {
+            let has_shader = {
+                let slang_attribute_regex =
+                    Regex::new(&format!(r#"\[shader\(\s*\"{}\"\s*\)\]"#, stage)).unwrap();
+                slang_attribute_regex.is_match(&src_file_str)
+            };
+            if has_shader && need_recompile(&src_file, &spv_path) {
                 println!("cargo:info=slangc compiling {:?}", src_file);
                 let status = Command::new("slangc")
                     .arg(&src_file)
