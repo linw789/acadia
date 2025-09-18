@@ -1,8 +1,8 @@
 use crate::{buffer::Buffer, common::Vertex};
 use ash::{Device, vk};
+use glam::Vec3;
 use std::{convert::AsRef, path::Path, vec::Vec};
 use tobj::{GPU_LOAD_OPTIONS, Model, load_obj};
-use glam::Vec3;
 
 pub struct Bounds {
     pub min: Vec3,
@@ -52,7 +52,10 @@ impl Mesh {
             let vertex_count = mesh.positions.len() / 3;
             let index_count = mesh.indices.len();
 
-            let mut bounds = Bounds { min: Vec3::MAX, max: Vec3::MIN };
+            let mut bounds = Bounds {
+                min: Vec3::MAX,
+                max: Vec3::MIN,
+            };
 
             for vi in 0..vertex_count {
                 let pos = [

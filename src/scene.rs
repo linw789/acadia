@@ -1,11 +1,11 @@
 use crate::{
-    mesh::{Mesh, Bounds},
-    texture::{Texture, TextureInfo, TextureSource},
     light::DirectionalLight,
+    mesh::{Bounds, Mesh},
+    texture::{Texture, TextureInfo, TextureSource},
 };
 use ash::{Device, vk};
+use glam::{Vec3, vec3};
 use std::{path::PathBuf, vec::Vec};
-use glam::{vec3, Vec3};
 
 #[derive(Default)]
 pub struct Entity {
@@ -43,7 +43,10 @@ impl Scene {
     }
 
     pub fn bounding_box(&self) -> Bounds {
-        let mut bounds = Bounds { min: Vec3::MAX, max: Vec3::MIN };
+        let mut bounds = Bounds {
+            min: Vec3::MAX,
+            max: Vec3::MIN,
+        };
 
         for mesh in &self.meshes {
             for submesh in &mesh.submeshes {

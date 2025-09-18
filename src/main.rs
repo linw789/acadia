@@ -22,7 +22,7 @@ use ::winit::{
 };
 use buffer::Buffer;
 use camera::{Camera, CameraBuilder};
-use glam::{Mat4, vec3, Vec3, vec2};
+use glam::{Mat4, Vec3, vec2, vec3};
 use gui::{DevGui, Text};
 use image::Image;
 use mesh::Bounds;
@@ -595,7 +595,8 @@ impl App {
         );
 
         assert!(SHADOW_FRAME_UNIFORM_DATA_SIZE % 16 == 0);
-        let shadow_frame_uniform_data_buffer_size = SHADOW_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
+        let shadow_frame_uniform_data_buffer_size =
+            SHADOW_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
         self.shadow_frame_uniform_data_buffer = Buffer::new(
             &vk_base.device,
             shadow_frame_uniform_data_buffer_size as u64,
@@ -793,7 +794,8 @@ impl App {
             self.shadow_pipeline.destruct(&vk_base.device);
             self.default_pipeline.destruct(&vk_base.device);
             self.frame_uniform_data_buffer.destruct(&vk_base.device);
-            self.shadow_frame_uniform_data_buffer.destruct(&vk_base.device);
+            self.shadow_frame_uniform_data_buffer
+                .destruct(&vk_base.device);
             self.shadow_image.destruct(&vk_base.device);
             vk_base.device.destroy_descriptor_pool(self.desc_pool, None);
             self.dev_gui.destruct(&vk_base.device);
@@ -834,8 +836,10 @@ impl App {
             .copy_data(frame_uniform_data_offset, &pv_matrix);
 
         let light_data = [self.scene.directional_light.direction.normalize()];
-        self.frame_uniform_data_buffer
-            .copy_data(frame_uniform_data_offset + camera_transform_size, &light_data);
+        self.frame_uniform_data_buffer.copy_data(
+            frame_uniform_data_offset + camera_transform_size,
+            &light_data,
+        );
     }
 
     fn update_shadow_frame_uniform_data_buffer(&self, in_flight_frame_index: usize) {
@@ -847,7 +851,7 @@ impl App {
     }
 
     fn render_shadow_pipeline(
-        &self, 
+        &self,
         device: &Device,
         cmd_buf: vk::CommandBuffer,
         in_flight_frame_index: usize,
@@ -896,8 +900,7 @@ impl App {
 
             for entity in &self.scene.entities {
                 let mesh = &self.scene.meshes[entity.mesh_index as usize];
-                device
-                    .cmd_bind_vertex_buffers(cmd_buf, 0, &[mesh.vertex_buffer.buf], &[0]);
+                device.cmd_bind_vertex_buffers(cmd_buf, 0, &[mesh.vertex_buffer.buf], &[0]);
 
                 device.cmd_bind_index_buffer(
                     cmd_buf,

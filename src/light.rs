@@ -7,7 +7,10 @@ pub struct DirectionalLight {
 
 impl DirectionalLight {
     pub fn new(position: Vec3, direction: Vec3) -> Self {
-        Self { position, direction }
+        Self {
+            position,
+            direction,
+        }
     }
 
     pub fn projection_matrix(&self) -> Mat4 {
@@ -17,10 +20,11 @@ impl DirectionalLight {
         let farz = 59.0;
 
         let m = Mat4::from_cols(
-            vec4(1.0/width, 0.0, 0.0, 0.0),
-            vec4(0.0, 1.0/height, 0.0, 0.0),
+            vec4(1.0 / width, 0.0, 0.0, 0.0),
+            vec4(0.0, 1.0 / height, 0.0, 0.0),
             vec4(0.0, 0.0, -1.0 / (farz - nearz), 0.0),
-            vec4(0.0, 0.0, farz / (farz - nearz), 1.0),);
+            vec4(0.0, 0.0, farz / (farz - nearz), 1.0),
+        );
 
         m.inverse()
     }
