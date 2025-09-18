@@ -1,10 +1,11 @@
 use crate::{
     mesh::{Mesh, Bounds},
     texture::{Texture, TextureInfo, TextureSource},
+    light::DirectionalLight,
 };
 use ash::{Device, vk};
 use std::{path::PathBuf, vec::Vec};
-use glam::Vec3;
+use glam::{vec3, Vec3};
 
 #[derive(Default)]
 pub struct Entity {
@@ -17,6 +18,7 @@ pub struct Scene {
     pub entities: Vec<Entity>,
     pub meshes: Vec<Mesh>,
     pub textures: Vec<Texture>,
+    pub directional_light: DirectionalLight,
 }
 
 pub struct SceneLoader<'a> {
@@ -105,10 +107,13 @@ impl<'a> SceneLoader<'a> {
             texture_indices: vec![0],
         }];
 
+        let directional_light = DirectionalLight::new(Vec3::ZERO, vec3(0.0, 0.0, -1.0));
+
         Scene {
             entities,
             meshes,
             textures,
+            directional_light,
         }
     }
 
@@ -151,10 +156,13 @@ impl<'a> SceneLoader<'a> {
             texture_indices: (0..textures.len()).map(|x| x as u32).collect(),
         }];
 
+        let directional_light = DirectionalLight::new(Vec3::ZERO, vec3(0.0, -0.5, 1.0));
+
         Scene {
             entities,
             meshes,
             textures,
+            directional_light,
         }
     }
 
@@ -168,7 +176,7 @@ impl<'a> SceneLoader<'a> {
 
         let textures = {
             // Create a dummy texture for meshes that don't have textures.
-            let dummy_texture_data: [u8; 4] = [186, 193, 196, 255];
+            let dummy_texture_data: [u8; 4] = [201, 211, 221, 255];
 
             let texture_infos = vec![TextureInfo {
                 src: TextureSource::Memory((
@@ -203,10 +211,13 @@ impl<'a> SceneLoader<'a> {
             texture_indices: vec![0, 0, 0, 0],
         }];
 
+        let directional_light = DirectionalLight::new(Vec3::ZERO, vec3(-1.0, -0.5, 0.0));
+
         Scene {
             entities,
             meshes,
             textures,
+            directional_light,
         }
     }
 }

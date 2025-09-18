@@ -1,6 +1,6 @@
 struct PerFrame {
     float4x4 pers_view_matrix;
-    float4 camera_lookat;
+    float3 light_direction;
 }
 [[vk::binding(0, 0)]]
 ConstantBuffer<PerFrame> per_frame;
@@ -42,8 +42,7 @@ struct Fragment {
 
 [shader("fragment")]
 Fragment fragment_main(FragmentInput fragment_input: FragmentInput) {
-    float3 light_dir = per_frame.camera_lookat.xyz;
-    float diff = max(dot(fragment_input.normal, light_dir), 0.0);
+    float diff = max(dot(fragment_input.normal, -per_frame.light_direction), 0.0);
 
     float4 texel = tex_sampler.Sample(fragment_input.uv);
 

@@ -1,9 +1,9 @@
 mod buffer;
 mod camera;
 mod common;
-mod descriptors;
 mod gui;
 mod image;
+mod light;
 mod mesh;
 mod pipeline;
 mod scene;
@@ -22,11 +22,11 @@ use ::winit::{
 };
 use buffer::Buffer;
 use camera::{Camera, CameraBuilder};
-use descriptors::Descriptors;
-use glam::{Mat4, Vec3, Vec4, vec2};
+use glam::{Mat4, vec3, Vec3, vec2};
 use gui::{DevGui, Text};
 use image::Image;
-use pipeline::{create_default_graphics_pipeline, create_dev_gui_graphics_pipeline};
+use mesh::Bounds;
+use pipeline::Pipeline;
 use scene::{Scene, SceneLoader};
 use shader::{Program, Shader, load_shaders};
 use std::{
@@ -35,6 +35,9 @@ use std::{
 };
 use swapchain::Swapchain;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+
+const PER_FRAME_DATA_SIZE: usize = 80;
+const SHADOW_PER_FRAME_DATA_SIZE: usize = 64;
 
 extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -362,7 +365,7 @@ impl VkBase {
         })
     }
 
-    pub fn recreate_swapchain(&mut self, image_extent: vk::Extent2D) {
+    pub fn recreate_swapchain(&mut self, image_extent: vk::Extent2D) -> bool {
         let surface_capabilities = unsafe {
             self.surface_loader
                 .get_physical_device_surface_capabilities(self.physical_device, self.surface)
@@ -382,6 +385,8 @@ impl VkBase {
             self.update_present_image_views();
             self.update_depth_image();
         }
+
+        recreated
     }
 
     fn update_present_image_views(&mut self) {
@@ -401,14 +406,10 @@ impl VkBase {
     }
 
     pub fn update_depth_image(&mut self) {
-        let device_memory_properties = unsafe {
-            self.inst
-                .get_physical_device_memory_properties(self.physical_device)
-        };
         self.depth_image.destruct(&self.device);
         self.depth_image = Image::new_depth_image(
             &self.device,
-            &device_memory_properties,
+            &self.device_memory_properties,
             self.swapchain.image_extent(),
             self.depth_format,
         );
@@ -433,7 +434,7 @@ impl Drop for VkBase {
     }
 }
 
-const MAX_FRAMES_IN_FLIGHT: u64 = 2;
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 #[derive(Default)]
 struct App {
@@ -442,9 +443,7 @@ struct App {
     window: Option<Window>,
     vk_base: Option<VkBase>,
 
-    desciptors: Descriptors,
-
-    frame_data_buffer: Buffer,
+    per_frame_data_buffer: Buffer,
     frame_fences: Vec<vk::Fence>,
     present_acquired_semaphores: Vec<vk::Semaphore>,
     render_complete_semaphores: Vec<vk::Semaphore>,
@@ -455,10 +454,18 @@ struct App {
 
     shader_set: HashMap<String, Rc<Shader>>,
     default_program: Program,
+    shadow_program: Program,
     dev_gui_program: Program,
 
-    default_pipeline: vk::Pipeline,
-    dev_gui_pipeline: vk::Pipeline,
+    shadow_per_frame_data_buffer: Buffer,
+    shadow_map_size: vk::Extent2D,
+    shadow_map: Image,
+
+    default_pipeline: Pipeline,
+    shadow_pipeline: Pipeline,
+    dev_gui_pipeline: Pipeline,
+
+    desc_pool: vk::DescriptorPool,
 
     dev_gui: DevGui,
     scene: Scene,
@@ -467,7 +474,7 @@ struct App {
 
     pub camera: Camera,
 
-    pub is_left_button_pressed: bool,
+    pub is_right_button_pressed: bool,
 }
 
 impl App {
@@ -485,10 +492,10 @@ impl App {
         self.vk_base = None;
     }
 
-    pub fn prepare_pipeline(&mut self) {
+    fn prepare_pipeline(&mut self) {
         let vk_base = self.vk_base.as_ref().unwrap();
 
-        assert!(MAX_FRAMES_IN_FLIGHT <= (vk_base.swapchain.present_images().len() as u64));
+        assert!(MAX_FRAMES_IN_FLIGHT <= vk_base.swapchain.present_images().len());
 
         self.draw_cmd_bufs = unsafe {
             let allocinfo = vk::CommandBufferAllocateInfo::default()
@@ -557,6 +564,11 @@ impl App {
                 Rc::clone(self.shader_set.get("default.frag").unwrap()),
             ],
         );
+        self.shadow_program = Program::new(
+            &vk_base.device,
+            vk::PipelineBindPoint::GRAPHICS,
+            vec![Rc::clone(self.shader_set.get("shadow.vert").unwrap())],
+        );
         self.dev_gui_program = Program::new(
             &vk_base.device,
             vk::PipelineBindPoint::GRAPHICS,
@@ -566,13 +578,22 @@ impl App {
             ],
         );
 
-        // let camera_transform_size = size_of::<Mat4>();
-        // let light_data_size = size_of::<Vec4>();
-        let frame_data_size = 96; // camera_transform_size + light_data_size;
-        let frame_buffer_size = frame_data_size * MAX_FRAMES_IN_FLIGHT;
-        self.frame_data_buffer = Buffer::new(
+        self.shadow_map_size = vk::Extent2D {
+            width: 2048,
+            height: 2048,
+        };
+        self.shadow_map = Image::new_depth_image(
             &vk_base.device,
-            frame_buffer_size as u64,
+            &vk_base.device_memory_properties,
+            self.shadow_map_size,
+            vk_base.depth_format,
+        );
+
+        assert!(PER_FRAME_DATA_SIZE % 16 == 0);
+        let per_frame_data_buffer_size = PER_FRAME_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
+        self.per_frame_data_buffer = Buffer::new(
+            &vk_base.device,
+            per_frame_data_buffer_size as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             &vk_base.device_memory_properties,
         );
@@ -606,70 +627,206 @@ impl App {
         )
         .load_shadow_test();
 
-        let scene_bounds = self.scene.bounding_box();
-        let camera_pos = Vec3::new(
+        assert!(SHADOW_PER_FRAME_DATA_SIZE % 16 == 0);
+        let shadow_per_frame_data_buffer_size = SHADOW_PER_FRAME_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
+        self.shadow_per_frame_data_buffer = Buffer::new(
+            &vk_base.device,
+            shadow_per_frame_data_buffer_size as u64,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            &vk_base.device_memory_properties,
+        );
+
+        let scene_bounds = {
+            let mut bounds = self.scene.bounding_box();
+            let min_bounds = Bounds {
+                min: -Vec3::ONE,
+                max: Vec3::ONE,
+            };
+            bounds.extend(&min_bounds);
+            bounds
+        };
+        let camera_pos = vec3(
             (scene_bounds.max.x + scene_bounds.min.x) / 2.0,
             (scene_bounds.max.y + scene_bounds.min.y) / 2.0,
             scene_bounds.max.z * 1.3,
         );
-        let scene_center = Vec3::new(
+        let scene_center = vec3(
             (scene_bounds.max.x + scene_bounds.min.x) / 2.0,
             (scene_bounds.max.y + scene_bounds.min.y) / 2.0,
             (scene_bounds.max.z + scene_bounds.min.z) / 2.0,
         );
         self.camera = CameraBuilder::new()
             .position(camera_pos)
-            .up(Vec3::new(0.0, 1.0, 0.0))
+            .up(vec3(0.0, 1.0, 0.0))
             .lookat(scene_center - camera_pos)
             .fov_y(40.0 / 180.0 * std::f32::consts::PI)
             .near_z(0.1)
             .build()
             .unwrap();
 
-        self.desciptors = Descriptors::new(&vk_base.device, self.scene.textures.len());
-
-        self.desciptors.update_per_frame_set(
-            &vk_base.device,
-            &self.frame_data_buffer,
-            frame_data_size,
-        );
-
-        self.desciptors
-            .update_dev_gui_sampler_set(&vk_base.device, &self.dev_gui.textures[0]);
-
-        for (i, texture) in self.scene.textures.iter().enumerate() {
-            self.desciptors
-                .update_sampler_set(&vk_base.device, i, texture);
-        }
-
         let color_attachment_formats = [vk_base.surface_format.format];
 
-        self.default_pipeline = create_default_graphics_pipeline(
+        self.desc_pool = {
+            let pool_sizes = [
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC,
+                    descriptor_count: 100,
+                },
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 100,
+                },
+            ];
+
+            let pool_createinfo = vk::DescriptorPoolCreateInfo::default()
+                .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+                .max_sets(50 as u32)
+                .pool_sizes(&pool_sizes);
+
+            unsafe {
+                vk_base
+                    .device
+                    .create_descriptor_pool(&pool_createinfo, None)
+                    .unwrap()
+            }
+        };
+
+        self.default_pipeline = Pipeline::new_default_graphics_pipeline(
             &vk_base.device,
+            self.desc_pool,
             &color_attachment_formats,
             vk_base.depth_format,
             &self.default_program,
+            self.scene.textures.len(),
         );
-        self.dev_gui_pipeline = create_dev_gui_graphics_pipeline(
+        self.shadow_pipeline = Pipeline::new_shadow_graphics_pipeline(
             &vk_base.device,
+            self.desc_pool,
+            vk_base.depth_format,
+            &self.shadow_program,
+        );
+        self.dev_gui_pipeline = Pipeline::new_dev_gui_graphics_pipeline(
+            &vk_base.device,
+            self.desc_pool,
             &color_attachment_formats,
             vk_base.depth_format,
             &self.dev_gui_program,
         );
+
+        self.write_default_pipeline_desc_sets(&vk_base.device);
+        self.write_shadow_pipeline_desc_sets(&vk_base.device);
+        self.write_dev_gui_pipeline_desc_sets(&vk_base.device);
     }
 
-    pub fn teardown_pipeline(&mut self) {
+    fn write_default_pipeline_desc_sets(&self, device: &Device) {
+        let desc_buf_info = vk::DescriptorBufferInfo::default()
+            .buffer(self.per_frame_data_buffer.buf)
+            .offset(0)
+            .range(PER_FRAME_DATA_SIZE as u64);
+
+        let mut desc_writes = Vec::with_capacity(1 + self.scene.textures.len());
+        desc_writes.push(
+            vk::WriteDescriptorSet::default()
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                .dst_set(self.default_pipeline.sets[0])
+                .dst_binding(0)
+                .dst_array_element(0)
+                .buffer_info(std::slice::from_ref(&desc_buf_info)),
+        );
+
+        let desc_image_infos: Vec<_> = self
+            .scene
+            .textures
+            .iter()
+            .map(|texture| {
+                vk::DescriptorImageInfo::default()
+                    .sampler(texture.sampler)
+                    .image_view(texture.image.view)
+                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            })
+            .collect();
+
+        for (i, _texture) in self.scene.textures.iter().enumerate() {
+            desc_writes.push(
+                vk::WriteDescriptorSet::default()
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .dst_set(self.default_pipeline.sets[i + 1])
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .image_info(std::slice::from_ref(&desc_image_infos[i])),
+            );
+        }
+
+        unsafe {
+            device.update_descriptor_sets(&desc_writes, &[]);
+        }
+    }
+
+    fn write_shadow_pipeline_desc_sets(&self, device: &Device) {
+        let desc_buf_info = vk::DescriptorBufferInfo::default()
+            .buffer(self.shadow_per_frame_data_buffer.buf)
+            .offset(0)
+            .range(SHADOW_PER_FRAME_DATA_SIZE as u64);
+
+        let desc_writes = [vk::WriteDescriptorSet::default()
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+            .dst_set(self.shadow_pipeline.sets[0])
+            .dst_binding(0)
+            .dst_array_element(0)
+            .buffer_info(std::slice::from_ref(&desc_buf_info))];
+
+        unsafe {
+            device.update_descriptor_sets(&desc_writes, &[]);
+        }
+    }
+
+    fn write_dev_gui_pipeline_desc_sets(&self, device: &Device) {
+        let desc_image_info = vk::DescriptorImageInfo::default()
+            .sampler(self.dev_gui.textures[0].sampler)
+            .image_view(self.dev_gui.textures[0].image.view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+
+        let desc_writes = [vk::WriteDescriptorSet::default()
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .dst_set(self.dev_gui_pipeline.sets[0])
+            .dst_binding(0)
+            .dst_array_element(0)
+            .image_info(std::slice::from_ref(&desc_image_info))];
+
+        unsafe {
+            device.update_descriptor_sets(&desc_writes, &[]);
+        }
+    }
+
+    fn update_shadow_map(&mut self) {
+        let vk_base = self.vk_base.as_ref().unwrap();
+
+        if self.shadow_map.image != vk::Image::null() {
+            self.shadow_map.destruct(&vk_base.device);
+        }
+
+        self.shadow_map = Image::new_depth_image(
+            &vk_base.device,
+            &vk_base.device_memory_properties,
+            self.shadow_map_size,
+            vk_base.depth_format,
+        );
+    }
+
+    fn teardown_pipeline(&mut self) {
         let vk_base = self.vk_base.as_ref().unwrap();
 
         unsafe {
             vk_base.device.device_wait_idle().unwrap();
             self.scene.destruct(&vk_base.device);
-            vk_base.device.destroy_pipeline(self.default_pipeline, None);
-            vk_base.device.destroy_pipeline(self.dev_gui_pipeline, None);
-            self.frame_data_buffer.destruct(&vk_base.device);
-            self.desciptors.destruct(&vk_base.device);
+            self.dev_gui_pipeline.destruct(&vk_base.device);
+            self.shadow_pipeline.destruct(&vk_base.device);
+            self.default_pipeline.destruct(&vk_base.device);
+            self.per_frame_data_buffer.destruct(&vk_base.device);
+            vk_base.device.destroy_descriptor_pool(self.desc_pool, None);
             self.dev_gui.destruct(&vk_base.device);
             self.default_program.destruct(&vk_base.device);
+            self.shadow_program.destruct(&vk_base.device);
             self.dev_gui_program.destruct(&vk_base.device);
             for (_name, shader) in self.shader_set.iter_mut() {
                 Rc::get_mut(shader).unwrap().destruct(&vk_base.device);
@@ -686,7 +843,7 @@ impl App {
         }
     }
 
-    pub fn update_uniform_buffer(&self, in_flight_frame_index: usize) {
+    fn update_per_frame_data_buffer(&self, in_flight_frame_index: usize) {
         let vk_base = self.vk_base.as_ref().unwrap();
 
         let image_extent = vk_base.swapchain.image_extent();
@@ -695,19 +852,111 @@ impl App {
             .camera
             .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
         // Compensate for Vulkan NDC's y-axis being pointing downwards.
-        let negative_y_matrix = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
-        let vp_matrix = [negative_y_matrix * pers_matrix * view_matrix];
+        let negative_y_matrix = Mat4::from_scale(vec3(1.0, -1.0, 1.0));
+        let pv_matrix = [negative_y_matrix * pers_matrix * view_matrix];
 
         let camera_transform_size = size_of::<Mat4>();
-        // let light_data_size = size_of::<Vec4>();
-        let frame_data_size = 96; // camera_transform_size + light_data_size;
-        let frame_data_offset = in_flight_frame_index * frame_data_size;
-        self.frame_data_buffer
-            .copy_data(frame_data_offset, &vp_matrix);
 
-        let light_data = [Vec4::from((self.camera.lookat_dir(), 1.0))];
-        self.frame_data_buffer
-            .copy_data(frame_data_offset + camera_transform_size, &light_data);
+        let per_frame_data_offset = in_flight_frame_index * PER_FRAME_DATA_SIZE;
+        self.per_frame_data_buffer
+            .copy_data(per_frame_data_offset, &pv_matrix);
+
+        let light_data = [self.scene.directional_light.direction.normalize()];
+        self.per_frame_data_buffer
+            .copy_data(per_frame_data_offset + camera_transform_size, &light_data);
+    }
+
+    fn update_shadow_per_frame_data_buffer(&self, in_flight_frame_index: usize) {
+        let light_proj_matrix = [self.scene.directional_light.projection_matrix()];
+
+        let per_frame_data_offset = in_flight_frame_index * SHADOW_PER_FRAME_DATA_SIZE;
+        self.per_frame_data_buffer
+            .copy_data(per_frame_data_offset, &light_proj_matrix);
+    }
+
+    fn render_shadow_pipeline(
+        &self, 
+        device: &Device,
+        cmd_buf: vk::CommandBuffer,
+        in_flight_frame_index: usize,
+    ) {
+        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(self.shadow_map.view)
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 0.0,
+                    stencil: 0,
+                },
+            });
+
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: self.shadow_map_size,
+            })
+            .layer_count(1)
+            .depth_attachment(&depth_attachment_info);
+
+        let viewport = vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: self.shadow_map_size.width as f32,
+            height: self.shadow_map_size.height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+        let scissor: vk::Rect2D = self.shadow_map_size.into();
+
+        unsafe {
+            device.cmd_begin_rendering(cmd_buf, &rendering_info);
+
+            device.cmd_bind_pipeline(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.shadow_pipeline.pipeline,
+            );
+
+            device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
+            device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
+
+            for entity in &self.scene.entities {
+                let mesh = &self.scene.meshes[entity.mesh_index as usize];
+                device
+                    .cmd_bind_vertex_buffers(cmd_buf, 0, &[mesh.vertex_buffer.buf], &[0]);
+
+                device.cmd_bind_index_buffer(
+                    cmd_buf,
+                    mesh.index_buffer.buf,
+                    0,
+                    vk::IndexType::UINT32,
+                );
+
+                device.cmd_bind_descriptor_sets(
+                    cmd_buf,
+                    self.shadow_program.bind_point,
+                    self.shadow_program.pipeline_layout,
+                    0,
+                    &self.shadow_pipeline.sets[0..1],
+                    &[(in_flight_frame_index * SHADOW_PER_FRAME_DATA_SIZE) as u32],
+                );
+
+                for submesh in &mesh.submeshes {
+                    device.cmd_draw_indexed(
+                        cmd_buf,
+                        submesh.index_count,
+                        1,
+                        submesh.index_offset,
+                        submesh.vertex_offset,
+                        1,
+                    );
+                }
+            }
+
+            device.cmd_end_rendering(cmd_buf);
+        }
     }
 
     fn render_default_pipeline(
@@ -739,16 +988,18 @@ impl App {
                     stencil: 0,
                 },
             });
+
+        let image_extent = vk_base.swapchain.image_extent();
+
         let rendering_info = vk::RenderingInfo::default()
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: vk_base.swapchain.image_extent(),
+                extent: image_extent,
             })
             .layer_count(1)
             .color_attachments(std::slice::from_ref(&color_attachment_info))
             .depth_attachment(&depth_attachment_info);
 
-        let image_extent = vk_base.swapchain.image_extent();
         let viewport = vk::Viewport {
             x: 0.0,
             y: 0.0,
@@ -765,7 +1016,7 @@ impl App {
             vk_base.device.cmd_bind_pipeline(
                 cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.default_pipeline,
+                self.default_pipeline.pipeline,
             );
 
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
@@ -784,26 +1035,24 @@ impl App {
                     vk::IndexType::UINT32,
                 );
 
-                // let camera_transform_size = size_of::<Mat4>();
-                // let light_data_size = size_of::<Vec4>();
-                let frame_data_size = 96; // camera_transform_size + light_data_size;
                 vk_base.device.cmd_bind_descriptor_sets(
                     cmd_buf,
                     self.default_program.bind_point,
                     self.default_program.pipeline_layout,
                     0,
-                    &[self.desciptors.per_frame_data_set()],
-                    &[(in_flight_frame_index * frame_data_size) as u32],
+                    &self.default_pipeline.sets[0..1],
+                    &[(in_flight_frame_index * PER_FRAME_DATA_SIZE) as u32],
                 );
 
                 for (submesh, texture_i) in mesh.submeshes.iter().zip(entity.texture_indices.iter())
                 {
+                    let texture_i = *texture_i as usize;
                     vk_base.device.cmd_bind_descriptor_sets(
                         cmd_buf,
                         self.default_program.bind_point,
                         self.default_program.pipeline_layout,
                         1,
-                        &[self.desciptors.sampler_set(*texture_i as usize)],
+                        &self.default_pipeline.sets[(texture_i + 1)..(texture_i + 2)],
                         &[],
                     );
 
@@ -859,7 +1108,7 @@ impl App {
             vk_base.device.cmd_bind_pipeline(
                 cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.dev_gui_pipeline,
+                self.dev_gui_pipeline.pipeline,
             );
 
             vk_base.device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
@@ -884,7 +1133,7 @@ impl App {
                 self.dev_gui_program.bind_point,
                 self.dev_gui_program.pipeline_layout,
                 0,
-                &[self.desciptors.dev_gui_sampler_set()],
+                &self.dev_gui_pipeline.sets[0..1],
                 &[],
             );
 
@@ -976,6 +1225,7 @@ impl App {
                 .cmd_pipeline_barrier2(cmd_buf, &dependency_info);
         }
 
+        self.render_shadow_pipeline(&vk_base.device, cmd_buf, in_flight_frame_index);
         self.render_default_pipeline(cmd_buf, present_image_view, in_flight_frame_index);
         self.render_dev_gui_pipeline(cmd_buf, present_image_view);
 
@@ -1018,7 +1268,7 @@ impl App {
             return;
         };
 
-        let in_flight_frame_index = (self.frame_count % MAX_FRAMES_IN_FLIGHT) as usize;
+        let in_flight_frame_index = (self.frame_count % (MAX_FRAMES_IN_FLIGHT as u64)) as usize;
         let present_acquired_semaphore = self.present_acquired_semaphores[in_flight_frame_index];
         let frame_fence = self.frame_fences[in_flight_frame_index];
 
@@ -1038,7 +1288,8 @@ impl App {
 
         let render_complete_semaphore = self.render_complete_semaphores[present_image_index];
 
-        self.update_uniform_buffer(in_flight_frame_index);
+        self.update_per_frame_data_buffer(in_flight_frame_index);
+        self.update_shadow_per_frame_data_buffer(in_flight_frame_index);
         self.record_command_buffer(present_image_index, in_flight_frame_index);
 
         unsafe {
@@ -1093,28 +1344,28 @@ impl ApplicationHandler for App {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowLeft)
                         | PhysicalKey::Code(KeyCode::KeyA) => {
-                            self.camera.translate_local(Vec3::new(-scale, 0.0, 0.0));
+                            self.camera.translate_local(vec3(-scale, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowRight)
                         | PhysicalKey::Code(KeyCode::KeyD) => {
-                            self.camera.translate_local(Vec3::new(scale, 0.0, 0.0));
+                            self.camera.translate_local(vec3(scale, 0.0, 0.0));
                         }
                         PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-                            self.camera.translate_local(Vec3::new(0.0, 0.0, -scale));
+                            self.camera.translate_local(vec3(0.0, 0.0, -scale));
                         }
                         PhysicalKey::Code(KeyCode::ArrowDown)
                         | PhysicalKey::Code(KeyCode::KeyS) => {
-                            self.camera.translate_local(Vec3::new(0.0, 0.0, scale));
+                            self.camera.translate_local(vec3(0.0, 0.0, scale));
                         }
                         _ => {}
                     }
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if button == MouseButton::Left {
+                if button == MouseButton::Right {
                     match state {
-                        ElementState::Pressed => self.is_left_button_pressed = true,
-                        ElementState::Released => self.is_left_button_pressed = false,
+                        ElementState::Pressed => self.is_right_button_pressed = true,
+                        ElementState::Released => self.is_right_button_pressed = false,
                     }
                 }
             }
@@ -1134,10 +1385,14 @@ impl ApplicationHandler for App {
                     size.width, size.height
                 );
                 if let Some(vk_base) = self.vk_base.as_mut() {
-                    vk_base.recreate_swapchain(vk::Extent2D {
+                    let recreated = vk_base.recreate_swapchain(vk::Extent2D {
                         width: size.width,
                         height: size.height,
                     });
+
+                    if recreated {
+                        self.update_shadow_map();
+                    }
                 }
             }
             _ => (),
@@ -1152,7 +1407,7 @@ impl ApplicationHandler for App {
     ) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
-                if self.is_left_button_pressed {
+                if self.is_right_button_pressed {
                     let scale = 0.2;
                     let ry = scale * (delta.0 as f32) / 180.0 * PI;
                     let rx = scale * (delta.1 as f32) / 180.0 * PI;
