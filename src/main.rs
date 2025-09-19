@@ -1010,23 +1010,25 @@ impl App {
                     vk::IndexType::UINT32,
                 );
 
+                vk_base.device.cmd_bind_descriptor_sets(
+                    cmd_buf,
+                    self.default_program.bind_point,
+                    self.default_program.pipeline_layout,
+                    0,
+                    &self.default_pipeline.sets[0..1],
+                    &[(in_flight_frame_index * FRAME_UNIFORM_DATA_SIZE) as u32],
+                );
+
                 for (submesh, texture_i) in mesh.submeshes.iter().zip(entity.texture_indices.iter())
                 {
                     let texture_i = *texture_i as usize;
-
-                    let desc_sets = [
-                        self.default_pipeline.sets[0],
-                        self.default_pipeline.sets[texture_i + 1],
-                    ];
-                    let set_offsets = [(in_flight_frame_index * FRAME_UNIFORM_DATA_SIZE) as u32];
-
                     vk_base.device.cmd_bind_descriptor_sets(
                         cmd_buf,
                         self.default_program.bind_point,
                         self.default_program.pipeline_layout,
-                        0,
-                        &desc_sets,
-                        &set_offsets,
+                        1,
+                        &self.default_pipeline.sets[(texture_i + 1)..(texture_i + 2)],
+                        &[],
                     );
 
                     vk_base.device.cmd_draw_indexed(
