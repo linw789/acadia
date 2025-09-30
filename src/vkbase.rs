@@ -1,10 +1,10 @@
 use crate::{image::Image, swapchain::Swapchain};
-use ::ash::{Device, Entry, Instance, ext::debug_utils, khr, vk};
-use ::winit::{
+use ash::{Device, Entry, Instance, ext::debug_utils, khr, vk};
+use std::{borrow::Cow, error::Error, ffi, os::raw::c_char};
+use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::Window,
 };
-use std::{borrow::Cow, error::Error, ffi, os::raw::c_char};
 
 extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -381,10 +381,8 @@ impl VkBase {
             self.depth_format,
         );
     }
-}
 
-impl Drop for VkBase {
-    fn drop(&mut self) {
+    pub fn destruct(&mut self) {
         unsafe {
             self.depth_image.destruct(&self.device);
             for view in &self.present_image_views {
