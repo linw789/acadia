@@ -62,8 +62,10 @@ impl CameraBuilder {
     /// Return a `Camera`. If `up` and `lookat` are almost parallel, return ErrorKind::InvalidInput.
     pub fn build(self) -> Result<Camera, Error> {
         let up = self.up.normalize();
-        // By Vulkan's convention, camera's lookat points to local -z axis.
-        let z_axis = -self.lookat.normalize();
+        let lookat_dir = self.lookat - self.position;
+        // To maintain the right-hand coordinate system, the camera lookat direction should points
+        // towards the camera's negative z-axis.
+        let z_axis = (-lookat_dir).normalize();
 
         if f32::abs(Vec3::dot(up, z_axis)) > 0.99 {
             return Err(Error::from(ErrorKind::InvalidInput));

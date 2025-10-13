@@ -21,7 +21,8 @@ pub struct Shader {
 pub struct Program {
     pub shaders: Vec<Rc<Shader>>,
     pub bind_point: vk::PipelineBindPoint,
-    set_layouts: [vk::DescriptorSetLayout; 4],
+    desc_set_layouts: [vk::DescriptorSetLayout; 4],
+    desc_set_layout_count: usize,
     pub pipeline_layout: vk::PipelineLayout,
 }
 
@@ -254,7 +255,7 @@ impl Program {
         bind_point: vk::PipelineBindPoint,
         shaders: Vec<Rc<Shader>>,
     ) -> Self {
-        let (set_layouts, count) = {
+        let (desc_set_layouts, desc_set_layout_count) = {
             let mut set_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] =
                 [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
@@ -285,46 +286,51 @@ impl Program {
             }
             let set_bindings_count = set_bindings.iter().filter(|sb| !sb.is_empty()).count();
 
-            let mut set_layouts = [vk::DescriptorSetLayout::null(); 4];
+            let mut desc_set_layouts = [vk::DescriptorSetLayout::null(); 4];
             let mut layout_count = 0;
             for (i, bindings) in set_bindings.iter().enumerate() {
                 if bindings.len() > 0 {
                     let set_layout_createinfo = vk::DescriptorSetLayoutCreateInfo::default()
                         // .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
                         .bindings(&bindings);
-                    set_layouts[i] = unsafe {
+                    desc_set_layouts[i] = unsafe {
                         device
                             .create_descriptor_set_layout(&set_layout_createinfo, None)
                             .unwrap()
                     };
                     layout_count = i + 1;
                 } else {
-                    // Each index of set_layouts represents a bindable descriptor set slot in the
+                    // Each index of desc_set_layouts represents a bindable descriptor set slot in the
                     // pipeline, there cannot be null inbetween valid set layouts.
                     break;
                 }
             }
             assert!(set_bindings_count == layout_count);
 
-            (set_layouts, layout_count)
+            (desc_set_layouts, layout_count)
         };
 
         let pipeline_layout = {
-            let createinfo =
-                vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts[0..count]);
+            let createinfo = vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(&desc_set_layouts[0..desc_set_layout_count]);
             unsafe { device.create_pipeline_layout(&createinfo, None).unwrap() }
         };
 
         Self {
             shaders,
             bind_point,
-            set_layouts,
+            desc_set_layouts,
+            desc_set_layout_count,
             pipeline_layout,
         }
     }
 
+    pub fn desc_set_layouts(&self) -> &[vk::DescriptorSetLayout] {
+        &self.desc_set_layouts[0..self.desc_set_layout_count]
+    }
+
     pub fn destruct(&mut self, device: &Device) {
-        for layout in self.set_layouts.iter_mut() {
+        for layout in self.desc_set_layouts.iter_mut() {
             if *layout != vk::DescriptorSetLayout::null() {
                 unsafe {
                     device.destroy_descriptor_set_layout(*layout, None);

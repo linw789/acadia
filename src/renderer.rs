@@ -1,10 +1,10 @@
 use crate::{
-    image::Image,
+    image::ImagePool,
     shader::{Shader, load_shaders},
     vkbase::VkBase,
 };
 use ash::vk;
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 use winit::window::Window;
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
@@ -20,13 +20,14 @@ pub struct Renderer {
 
     pub desc_pool: vk::DescriptorPool,
     pub shader_set: HashMap<String, Rc<Shader>>,
+    pub image_pool: ImagePool,
+
+    pub depth_format: vk::Format,
+    depth_image_index: u32,
 
     frame_count: u64,
-}
-
-pub struct FrameIndex {
-    pub present_image_index: usize,
-    pub in_flight_frame_index: usize,
+    in_flight_frame_index: usize,
+    present_image_index: usize,
 }
 
 impl Renderer {
@@ -101,6 +102,13 @@ impl Renderer {
 
         let shader_set = load_shaders(&vkbase.device, "target/shaders/");
 
+        let mut image_pool =
+            ImagePool::new(Arc::clone(&vkbase.device), vkbase.device_memory_properties);
+
+        let depth_format = vk::Format::D32_SFLOAT;
+        let depth_image_index =
+            image_pool.new_depth_image(vkbase.swapchain.image_extent(), depth_format);
+
         Self {
             vkbase,
             frame_fences,
@@ -111,15 +119,37 @@ impl Renderer {
 
             desc_pool,
             shader_set,
+            image_pool,
+
+            depth_format,
+            depth_image_index,
 
             frame_count: 0,
+            in_flight_frame_index: 0,
+            present_image_index: 0,
         }
     }
 
-    pub fn begin_frame(&self) -> FrameIndex {
-        let in_flight_frame_index = (self.frame_count % (MAX_FRAMES_IN_FLIGHT as u64)) as usize;
-        let present_acquired_semaphore = self.present_acquired_semaphores[in_flight_frame_index];
-        let frame_fence = self.frame_fences[in_flight_frame_index];
+    pub fn depth_image_view(&self) -> vk::ImageView {
+        self.image_pool.get_at_index(self.depth_image_index).view
+    }
+
+    pub fn present_image_view(&self) -> vk::ImageView {
+        self.vkbase.present_image_views[self.present_image_index]
+    }
+
+    pub fn curr_cmd_cuf(&self) -> vk::CommandBuffer {
+        self.cmd_bufs[self.in_flight_frame_index]
+    }
+
+    pub fn in_flight_frame_index(&self) -> usize {
+        self.in_flight_frame_index
+    }
+
+    pub fn begin_frame(&mut self) {
+        let present_acquired_semaphore =
+            self.present_acquired_semaphores[self.in_flight_frame_index];
+        let frame_fence = self.frame_fences[self.in_flight_frame_index];
 
         unsafe {
             self.vkbase
@@ -130,14 +160,14 @@ impl Renderer {
         }
 
         // TODO: recreate swapchain if vkResult is OUT_OF_DATE.
-        let present_image_index = self
+        self.present_image_index = self
             .vkbase
             .swapchain
             .acquire_next_image(present_acquired_semaphore)
             .unwrap() as usize;
 
-        let cmd_buf = self.cmd_bufs[in_flight_frame_index];
-        let present_image = self.vkbase.swapchain.present_images()[present_image_index];
+        let cmd_buf = self.cmd_bufs[self.in_flight_frame_index];
+        let present_image = self.vkbase.swapchain.present_images()[self.present_image_index];
 
         // Re-start command buffer recording.
         unsafe {
@@ -182,6 +212,7 @@ impl Renderer {
 
         // Transition the depth image to the layout DEPTH_ATTACHMENT_OPTIMAL.
         unsafe {
+            let depth_image = self.image_pool.get_at_index(self.depth_image_index);
             let barrier = vk::ImageMemoryBarrier2::default()
                 .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
                 .src_access_mask(vk::AccessFlags2::NONE)
@@ -197,7 +228,7 @@ impl Renderer {
                 .new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(self.vkbase.depth_image.image)
+                .image(depth_image.image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::DEPTH,
                     base_mip_level: 0,
@@ -211,22 +242,15 @@ impl Renderer {
                 .device
                 .cmd_pipeline_barrier2(cmd_buf, &dependency_info);
         }
-
-        FrameIndex {
-            present_image_index,
-            in_flight_frame_index,
-        }
     }
 
-    pub fn end_frame(&mut self, frame_index: &FrameIndex) {
-        let present_image_index = frame_index.present_image_index;
-
-        let frame_fence = self.frame_fences[frame_index.in_flight_frame_index];
+    pub fn end_frame(&mut self) {
+        let frame_fence = self.frame_fences[self.in_flight_frame_index];
         let present_acquired_semaphore =
-            self.present_acquired_semaphores[frame_index.in_flight_frame_index];
-        let render_complete_semaphore = self.render_complete_semaphores[present_image_index];
-        let present_image = self.vkbase.swapchain.present_images()[present_image_index];
-        let cmd_buf = self.cmd_bufs[frame_index.in_flight_frame_index];
+            self.present_acquired_semaphores[self.in_flight_frame_index];
+        let render_complete_semaphore = self.render_complete_semaphores[self.present_image_index];
+        let present_image = self.vkbase.swapchain.present_images()[self.present_image_index];
+        let cmd_buf = self.cmd_bufs[self.in_flight_frame_index];
 
         // After rendering, transition the present image to the layout PRESENT_SRC_KHR.
         unsafe {
@@ -275,20 +299,30 @@ impl Renderer {
         self.vkbase.swapchain.queue_present(
             self.vkbase.present_queue,
             render_complete_semaphore,
-            present_image_index as u32,
+            self.present_image_index as u32,
         );
 
         assert!(self.frame_count < u64::MAX);
         self.frame_count += 1;
+
+        // Because we need to use `in_flight_frame_index` before `begin_frame()` is called, we
+        // update it at the end of a frame. The first usage of `in_flight_frame_index` will be the
+        // initial value 0, which is fine.
+        self.in_flight_frame_index = (self.frame_count % (MAX_FRAMES_IN_FLIGHT as u64)) as usize;
+    }
+
+    pub fn resize(&mut self, size: vk::Extent2D) {
+        let recreated = self.vkbase.recreate_swapchain(size);
+        if recreated {
+            self.image_pool.delete_at_index(self.depth_image_index);
+            self.depth_image_index = self
+                .image_pool
+                .new_depth_image(self.vkbase.swapchain.image_extent(), self.depth_format);
+        }
     }
 
     pub fn destruct(&mut self) {
         unsafe {
-            self.vkbase
-                .device
-                .destroy_descriptor_pool(self.desc_pool, None);
-            self.desc_pool = vk::DescriptorPool::null();
-
             for (_name, shader) in self.shader_set.iter_mut() {
                 Rc::get_mut(shader).unwrap().destruct(&self.vkbase.device);
             }
@@ -302,6 +336,13 @@ impl Renderer {
             for fence in &self.frame_fences {
                 self.vkbase.device.destroy_fence(*fence, None);
             }
+
+            self.vkbase
+                .device
+                .destroy_descriptor_pool(self.desc_pool, None);
+            self.desc_pool = vk::DescriptorPool::null();
+
+            self.image_pool.destruct();
 
             self.vkbase.destruct();
         }

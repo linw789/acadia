@@ -79,13 +79,28 @@ impl App {
 
         let screen_size = vec2(self.window_width as f32, self.window_height as f32);
         self.dev_gui = DevGui::new(screen_size);
-        self.dev_gui.load_font_texture(
-            &renderer.vkbase.device,
-            &renderer.vkbase.device_memory_properties,
-            1.0, /* max_sampler_anisotropy */
+
+        let font_bitmap_bytes = [(
+            self.dev_gui.font_bitmap.pixels.as_slice(),
+            vk::Extent3D {
+                width: self.dev_gui.font_bitmap.width,
+                height: self.dev_gui.font_bitmap.height,
+                depth: 1,
+            },
+        )];
+        let font_image_index = renderer.image_pool.new_images_from_bytes(
+            &font_bitmap_bytes,
+            vk::Format::R8_UNORM,
+            vk::ComponentMapping {
+                r: vk::ComponentSwizzle::R,
+                g: vk::ComponentSwizzle::R,
+                b: vk::ComponentSwizzle::R,
+                a: vk::ComponentSwizzle::R,
+            },
             renderer.cmd_bufs[0],
             renderer.vkbase.present_queue,
-        );
+        )[0];
+        self.dev_gui.setup_font_texture(&renderer.vkbase.device, font_image_index);
 
         self.default_program = Program::new(
             &renderer.vkbase.device,
@@ -715,10 +730,14 @@ impl ApplicationHandler for App {
                     size.width, size.height
                 );
                 if let Some(renderer) = self.renderer.as_mut() {
-                    let _recreated = renderer.vkbase.recreate_swapchain(vk::Extent2D {
+                    let recreated = renderer.vkbase.recreate_swapchain(vk::Extent2D {
                         width: size.width,
                         height: size.height,
                     });
+
+                    if recreated {
+                        renderer.update_depth_image();
+                    }
                 }
             }
             _ => (),

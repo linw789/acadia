@@ -1,6 +1,6 @@
 use crate::{image::Image, swapchain::Swapchain};
 use ash::{Device, Entry, Instance, ext::debug_utils, khr, vk};
-use std::{borrow::Cow, error::Error, ffi, os::raw::c_char};
+use std::{borrow::Cow, error::Error, ffi, os::raw::c_char, sync::Arc};
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::Window,
@@ -94,7 +94,7 @@ fn create_present_image_views(
 pub struct VkBase {
     pub inst: Instance,
     pub physical_device: vk::PhysicalDevice,
-    pub device: Device,
+    pub device: Arc<Device>,
     pub debug_util_loader: debug_utils::Instance,
     pub debug_messenger: vk::DebugUtilsMessengerEXT,
     pub surface_loader: khr::surface::Instance,
@@ -112,8 +112,6 @@ pub struct VkBase {
     pub present_image_views: Vec<vk::ImageView>,
 
     pub cmd_pool: vk::CommandPool,
-
-    pub depth_image: Image,
 }
 
 impl VkBase {
@@ -236,8 +234,10 @@ impl VkBase {
                 .enabled_features(&features)
                 .push_next(&mut vk13_features);
             unsafe {
-                inst.create_device(physical_device, &device_createinfo, None)
-                    .unwrap()
+                Arc::new(
+                    inst.create_device(physical_device, &device_createinfo, None)
+                        .unwrap(),
+                )
             }
         };
 
@@ -299,13 +299,6 @@ impl VkBase {
         let device_memory_properties =
             unsafe { inst.get_physical_device_memory_properties(physical_device) };
 
-        let depth_image = Image::new_depth_image(
-            &device,
-            &device_memory_properties,
-            swapchain.image_extent(),
-            depth_format,
-        );
-
         Ok(Self {
             inst,
             physical_device,
@@ -327,8 +320,6 @@ impl VkBase {
             present_image_views,
 
             cmd_pool,
-
-            depth_image,
         })
     }
 
@@ -350,7 +341,6 @@ impl VkBase {
 
         if recreated {
             self.update_present_image_views();
-            self.update_depth_image();
         }
 
         recreated
@@ -372,19 +362,8 @@ impl VkBase {
         )
     }
 
-    pub fn update_depth_image(&mut self) {
-        self.depth_image.destruct(&self.device);
-        self.depth_image = Image::new_depth_image(
-            &self.device,
-            &self.device_memory_properties,
-            self.swapchain.image_extent(),
-            self.depth_format,
-        );
-    }
-
     pub fn destruct(&mut self) {
         unsafe {
-            self.depth_image.destruct(&self.device);
             for view in &self.present_image_views {
                 self.device.destroy_image_view(*view, None);
             }

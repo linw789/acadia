@@ -136,7 +136,7 @@ impl Mesh {
         }
     }
 
-    pub(super) fn destruct(&mut self, device: &Device) {
+    pub fn destruct(&mut self, device: &Device) {
         self.index_buffer.destruct(device);
         self.vertex_buffer.destruct(device);
     }

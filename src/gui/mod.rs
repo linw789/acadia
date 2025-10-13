@@ -1,10 +1,6 @@
 pub mod font;
 
-use crate::{
-    buffer::Buffer,
-    common::Vertex2D,
-    texture::{Texture, TextureInfo, TextureSource},
-};
+use crate::{buffer::Buffer, common::Vertex2D, image::ImagePool, texture::Texture};
 use ash::{Device, vk};
 use font::FontBitmap;
 use glam::{Vec2, Vec4, vec2};
@@ -28,7 +24,7 @@ pub struct DevGui {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
 
-    pub textures: Vec<Texture>,
+    pub texture: Texture,
 }
 
 impl DevGui {
@@ -42,42 +38,8 @@ impl DevGui {
         }
     }
 
-    pub fn load_font_texture(
-        &mut self,
-        device: &Device,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        max_sampler_anisotropy: f32,
-        cmd_buf: vk::CommandBuffer,
-        queue: vk::Queue,
-    ) {
-        self.textures = {
-            let texture_infos = vec![TextureInfo {
-                src: TextureSource::Memory((
-                    &self.font_bitmap.pixels,
-                    vk::Extent3D {
-                        width: self.font_bitmap.width,
-                        height: self.font_bitmap.height,
-                        depth: 1,
-                    },
-                )),
-                format: vk::Format::R8_UNORM,
-                max_sampler_anisotropy: max_sampler_anisotropy,
-                view_component: vk::ComponentMapping {
-                    r: vk::ComponentSwizzle::R,
-                    g: vk::ComponentSwizzle::R,
-                    b: vk::ComponentSwizzle::R,
-                    a: vk::ComponentSwizzle::R,
-                },
-            }];
-
-            Texture::load_textures(
-                device,
-                cmd_buf,
-                queue,
-                device_memory_properties,
-                &texture_infos,
-            )
-        };
+    pub fn setup_font_texture(&mut self, device: &Device, image_index: u32) {
+        self.texture = Texture::new(device, image_index);
     }
 
     pub fn text(&mut self, s: &Text) {
@@ -172,9 +134,6 @@ impl DevGui {
     pub fn destruct(&mut self, device: &Device) {
         self.vertex_buffer.destruct(device);
         self.index_buffer.destruct(device);
-        for texture in self.textures.iter_mut() {
-            texture.destruct(device);
-        }
-        self.textures.clear();
+        self.texture.destruct(device);
     }
 }
