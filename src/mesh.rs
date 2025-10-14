@@ -119,7 +119,7 @@ impl Mesh {
             vk::BufferUsageFlags::VERTEX_BUFFER,
             memory_properties,
         );
-        vertex_buffer.copy_data(0, &vertices);
+        vertex_buffer.copy_slice(0, &vertices);
 
         let index_buffer = Buffer::new(
             device,
@@ -127,7 +127,7 @@ impl Mesh {
             vk::BufferUsageFlags::INDEX_BUFFER,
             memory_properties,
         );
-        index_buffer.copy_data(0, &indices);
+        index_buffer.copy_slice(0, &indices);
 
         Self {
             vertex_buffer,

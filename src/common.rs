@@ -25,3 +25,7 @@ pub struct Vertex2D {
     pub color: [f32; 4],
     pub uv: [f32; 2],
 }
+
+pub fn size_of_var<T>(_var: &T) -> usize {
+    size_of::<T>()
+}

@@ -120,7 +120,7 @@ impl DevGui {
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &memory_properties,
         );
-        self.vertex_buffer.copy_data(0, &self.vertices);
+        self.vertex_buffer.copy_slice(0, &self.vertices);
 
         self.index_buffer = Buffer::new(
             &device,
@@ -128,7 +128,7 @@ impl DevGui {
             vk::BufferUsageFlags::INDEX_BUFFER,
             &memory_properties,
         );
-        self.index_buffer.copy_data(0, &self.indices);
+        self.index_buffer.copy_slice(0, &self.indices);
     }
 
     pub fn destruct(&mut self, device: &Device) {

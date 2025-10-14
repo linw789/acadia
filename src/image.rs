@@ -125,7 +125,7 @@ impl ImagePool {
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 &self.device_memory_properties,
             );
-            buf.copy_data(0, bytes);
+            buf.copy_slice(0, bytes);
             staging_buffers.push(buf);
         }
 

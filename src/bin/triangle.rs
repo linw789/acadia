@@ -1,5 +1,5 @@
 use ::ash::vk;
-use ::glam::{Mat4, vec3};
+use ::glam::{Mat4};
 use ::winit::{
     dpi::PhysicalSize,
     event_loop::{ControlFlow, EventLoop},
@@ -9,7 +9,7 @@ use acadia::{
     app::App,
     buffer::Buffer,
     camera::Camera,
-    common::Vertex,
+    common::{size_of_var, Vertex},
     mesh::Mesh,
     offset_of,
     pipeline::new_graphics_pipeline,
@@ -219,11 +219,9 @@ impl Scene for Triangle {
         };
 
         self.per_frame_uniform_buf = {
-            let per_frame_uniform_buf_total_size =
-                PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
             Buffer::new(
                 &renderer.vkbase.device,
-                per_frame_uniform_buf_total_size as u64,
+                (PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT) as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 &renderer.vkbase.device_memory_properties,
             )
@@ -254,14 +252,14 @@ impl Scene for Triangle {
 
         let image_extent = renderer.vkbase.swapchain.image_extent();
         let image_aspect_ratio = (image_extent.width as f32) / (image_extent.height as f32);
-        let pv_matrix = [camera.ny_pers_view_matrix(image_aspect_ratio)];
+        let pv_matrix = camera.ny_pers_view_matrix(image_aspect_ratio);
 
-        assert!(PER_FRAME_UNIFORM_DATA_SIZE == pv_matrix.len() * size_of::<Mat4>());
+        assert!(PER_FRAME_UNIFORM_DATA_SIZE == size_of_var(&pv_matrix));
 
         let per_frame_uniform_data_offset =
             renderer.in_flight_frame_index() * PER_FRAME_UNIFORM_DATA_SIZE;
         self.per_frame_uniform_buf
-            .copy_data(per_frame_uniform_data_offset, &pv_matrix);
+            .copy_value(per_frame_uniform_data_offset, &pv_matrix);
 
         self.draw_frame();
     }

@@ -1,6 +1,6 @@
 use crate::util::find_memorytype_index;
-use ::ash::{Device, util::Align, vk};
-use std::{ffi::c_void, marker::Copy};
+use ::ash::{Device, vk};
+use std::{ffi::c_void, ptr::copy_nonoverlapping};
 
 #[derive(Default)]
 pub struct Buffer {
@@ -55,7 +55,7 @@ impl Buffer {
         Self {
             buf,
             mem,
-            size: required_size,
+            size,
             ptr,
         }
     }
@@ -69,13 +69,25 @@ impl Buffer {
         self.buf = vk::Buffer::null();
     }
 
-    /// Copy data from system memory to GPU memory.
-    pub fn copy_data<T: Copy>(&self, offset: usize, data: &[T]) {
-        assert!(self.size >= (offset + data.len()) as u64);
-        let mut data_align = unsafe {
-            let offset_ptr = (self.ptr as *mut u8).add(offset) as *mut c_void;
-            Align::new(offset_ptr, align_of::<T>() as u64, self.size)
-        };
-        data_align.copy_from_slice(data);
+    pub fn copy_slice<T>(&self, offset: usize, slice: &[T]) {
+        assert!(self.size >= (offset + size_of::<T>() * slice.len()) as u64);
+        unsafe {
+            let dst_ptr = (self.ptr as *mut u8).add(offset) as *mut T;
+            copy_nonoverlapping(slice.as_ptr(), dst_ptr, slice.len());
+        }
+    }
+
+    pub fn copy_value<T>(&self, offset: usize, data: &T) {
+        assert!(
+            self.size >= (offset + size_of::<T>()) as u64,
+            "buffer size: {}, offset: {}, data size: {}",
+            self.size,
+            offset,
+            size_of::<T>()
+        );
+        unsafe {
+            let dst_ptr = (self.ptr as *mut u8).add(offset) as *mut T;
+            copy_nonoverlapping(data as *const T, dst_ptr, 1);
+        }
     }
 }
