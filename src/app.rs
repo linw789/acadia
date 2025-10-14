@@ -1,4 +1,4 @@
-use crate::scene::Scene;
+use crate::{camera::{Camera, CameraBuilder}, scene::Scene};
 use ::winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -7,24 +7,38 @@ use ::winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
-use glam::UVec2;
+use glam::vec3;
+use std::f32::consts::PI;
 
 pub struct App {
     window_size: PhysicalSize<u32>,
     window: Option<Window>,
 
     scene: Box<dyn Scene>,
+    camera: Camera,
 
     exit_requested: bool,
+    is_right_button_pressed: bool,
 }
 
 impl App {
     pub fn new(window_size: PhysicalSize<u32>, scene: Box<dyn Scene>) -> Self {
+        let camera = CameraBuilder::new()
+            .position(vec3(0.0, 0.0, 5.0))
+            .up(vec3(0.0, 1.0, 0.0))
+            .lookat(vec3(0.0, 0.0, 0.0))
+            .fov_y(40.0 / 180.0 * std::f32::consts::PI)
+            .near_z(0.1)
+            .build()
+            .unwrap();
+
         Self {
             window_size,
             window: None,
             scene,
+            camera,
             exit_requested: false,
+            is_right_button_pressed: false,
         }
     }
 
@@ -33,21 +47,11 @@ impl App {
     }
 
     fn update(&mut self) {
-        self.scene.update();
+        self.scene.update(&self.camera);
     }
 
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
         self.scene.resize(new_size);
-        // if let Some(renderer) = self.renderer.as_mut() {
-        //     let recreated = renderer.vkbase.recreate_swapchain(vk::Extent2D {
-        //         width: size.width,
-        //         height: size.height,
-        //     });
-
-        //     if recreated {
-        //         renderer.update_depth_image();
-        //     }
-        // }
     }
 
     fn destruct(&mut self) {
@@ -72,7 +76,6 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            /*
             WindowEvent::KeyboardInput { event, .. } => {
                 let scale = 0.52;
                 if event.state.is_pressed() {
@@ -104,7 +107,6 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            */
             WindowEvent::CloseRequested => {
                 println!("[DEBUG LINW] close requested.");
                 self.destruct();
@@ -135,7 +137,6 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         match event {
-            /*
             DeviceEvent::MouseMotion { delta } => {
                 if self.is_right_button_pressed {
                     let scale = 0.2;
@@ -146,7 +147,6 @@ impl ApplicationHandler for App {
                     self.camera.rotate_local_x(-rx);
                 }
             }
-            */
             _ => (),
         }
     }

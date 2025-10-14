@@ -8,7 +8,7 @@ use ::winit::{
 use acadia::{
     app::App,
     buffer::Buffer,
-    camera::{Camera, CameraBuilder},
+    camera::Camera,
     common::Vertex,
     mesh::Mesh,
     offset_of,
@@ -26,7 +26,6 @@ struct Triangle {
     renderer: Option<Renderer>,
     program: Program,
     mesh: Mesh,
-    camera: Camera,
 
     pipeline: vk::Pipeline,
     desc_set: vk::DescriptorSet,
@@ -161,14 +160,6 @@ impl Scene for Triangle {
             &renderer.vkbase.device_memory_properties,
             "assets/meshes/triangle.obj",
         );
-        self.camera = CameraBuilder::new()
-            .position(vec3(0.0, 0.0, 5.0))
-            .up(vec3(0.0, 1.0, 0.0))
-            .lookat(vec3(0.0, 0.0, 0.0))
-            .fov_y(40.0 / 180.0 * std::f32::consts::PI)
-            .near_z(0.1)
-            .build()
-            .unwrap();
 
         self.pipeline = {
             let vertex_binding_descs = [vk::VertexInputBindingDescription::default()
@@ -258,13 +249,12 @@ impl Scene for Triangle {
         self.renderer = Some(renderer);
     }
 
-    fn update(&mut self) {
+    fn update(&mut self, camera: &Camera) {
         let renderer = self.renderer.as_ref().unwrap();
         let image_extent = renderer.vkbase.swapchain.image_extent();
-        let view_matrix = self.camera.view_matrix();
-        let pers_matrix = self
-            .camera
-            .perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
+        let view_matrix = camera.view_matrix();
+        let pers_matrix =
+            camera.perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
         // Compensate for Vulkan NDC's y-axis being pointing downwards.
         let negative_y_matrix = Mat4::from_scale(vec3(1.0, -1.0, 1.0));
         let pv_matrix = [negative_y_matrix * pers_matrix * view_matrix];
