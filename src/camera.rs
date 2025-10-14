@@ -1,4 +1,4 @@
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3, vec3};
 use std::{f32::consts::PI, io::Error, io::ErrorKind, result::Result};
 
 pub struct Camera {
@@ -130,6 +130,15 @@ impl Camera {
     /// `aspect_ratio` is the ratio of viewport's width over height.
     pub fn perspective_matrix(&self, aspect_ratio: f32) -> Mat4 {
         Mat4::perspective_infinite_reverse_rh(self.fov_y, aspect_ratio, self.near_z)
+    }
+
+    /// Return negative_y_matrix * perspective_matrix * view_matrix.
+    pub fn ny_pers_view_matrix(&self, aspect_ratio: f32) -> Mat4 {
+        let view_matrix = self.view_matrix();
+        let pers_matrix = self.perspective_matrix(aspect_ratio);
+        // Compensate for Vulkan NDC's y-axis being pointing downwards.
+        let negative_y_matrix = Mat4::from_scale(vec3(1.0, -1.0, 1.0));
+        negative_y_matrix * pers_matrix * view_matrix
     }
 }
 

@@ -251,13 +251,10 @@ impl Scene for Triangle {
 
     fn update(&mut self, camera: &Camera) {
         let renderer = self.renderer.as_ref().unwrap();
+
         let image_extent = renderer.vkbase.swapchain.image_extent();
-        let view_matrix = camera.view_matrix();
-        let pers_matrix =
-            camera.perspective_matrix((image_extent.width as f32) / (image_extent.height as f32));
-        // Compensate for Vulkan NDC's y-axis being pointing downwards.
-        let negative_y_matrix = Mat4::from_scale(vec3(1.0, -1.0, 1.0));
-        let pv_matrix = [negative_y_matrix * pers_matrix * view_matrix];
+        let image_aspect_ratio = (image_extent.width as f32) / (image_extent.height as f32);
+        let pv_matrix = [camera.ny_pers_view_matrix(image_aspect_ratio)];
 
         assert!(PER_FRAME_UNIFORM_DATA_SIZE == pv_matrix.len() * size_of::<Mat4>());
 
