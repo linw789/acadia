@@ -100,7 +100,9 @@ impl Renderer {
             }
         };
 
-        let shader_set = load_shaders(&vkbase.device, "target/shaders/");
+        let shaders_dir = "target/shaders/";
+        let mut shader_set = HashMap::new();
+        load_shaders(&vkbase.device, shaders_dir, shaders_dir, &mut shader_set);
 
         let mut image_pool =
             ImagePool::new(Arc::clone(&vkbase.device), vkbase.device_memory_properties);

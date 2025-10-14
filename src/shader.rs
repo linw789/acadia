@@ -9,7 +9,6 @@ use std::{
 };
 
 pub struct Shader {
-    pub name: String,
     pub stage: vk::ShaderStageFlags,
     pub shader_module: vk::ShaderModule,
     descriptor_infos: Vec<DescriptorInfo>,
@@ -45,18 +44,28 @@ struct SpvId {
 pub fn load_shaders<P: AsRef<Path>>(
     device: &Device,
     shaders_dir: P,
-) -> HashMap<String, Rc<Shader>> {
+    root_dir: P,
+    shader_set: &mut HashMap<String, Rc<Shader>>,
+) {
     assert!(shaders_dir.as_ref().is_dir());
-    let mut shader_set = HashMap::new();
     for entry in read_dir(shaders_dir).unwrap() {
         let entry = entry.unwrap();
         let shader_path = entry.path();
-        if shader_path.is_dir() == false {
-            let shader = Shader::new(device, shader_path);
-            shader_set.insert(shader.name.clone(), Rc::new(shader));
+        if shader_path.is_dir() {
+            load_shaders(device, shader_path.as_path(), root_dir.as_ref(), shader_set);
+        } else {
+            let shader = Shader::new(device, &shader_path);
+            let mut shader_path = shader_path;
+            shader_path.set_extension("");
+            let shader_name = shader_path
+                .strip_prefix(&root_dir)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            shader_set.insert(shader_name, Rc::new(shader));
         }
     }
-    shader_set
 }
 
 impl Shader {
@@ -73,16 +82,7 @@ impl Shader {
             }
         };
 
-        let name = spv_path
-            .as_ref()
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned();
-
         let mut shader = Self {
-            name,
             stage: vk::ShaderStageFlags::VERTEX,
             descriptor_infos: Vec::new(),
             shader_module,
