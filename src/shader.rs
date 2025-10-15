@@ -291,7 +291,6 @@ impl Program {
             for (i, bindings) in set_bindings.iter().enumerate() {
                 if bindings.len() > 0 {
                     let set_layout_createinfo = vk::DescriptorSetLayoutCreateInfo::default()
-                        // .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
                         .bindings(&bindings);
                     desc_set_layouts[i] = unsafe {
                         device
