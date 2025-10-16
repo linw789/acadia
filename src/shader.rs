@@ -290,8 +290,8 @@ impl Program {
             let mut layout_count = 0;
             for (i, bindings) in set_bindings.iter().enumerate() {
                 if bindings.len() > 0 {
-                    let set_layout_createinfo = vk::DescriptorSetLayoutCreateInfo::default()
-                        .bindings(&bindings);
+                    let set_layout_createinfo =
+                        vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
                     desc_set_layouts[i] = unsafe {
                         device
                             .create_descriptor_set_layout(&set_layout_createinfo, None)

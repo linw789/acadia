@@ -1,5 +1,5 @@
 use ::ash::vk;
-use ::glam::{Mat4};
+use ::glam::Mat4;
 use ::winit::{
     dpi::PhysicalSize,
     event_loop::{ControlFlow, EventLoop},
@@ -9,7 +9,7 @@ use acadia::{
     app::App,
     buffer::Buffer,
     camera::Camera,
-    common::{size_of_var, Vertex},
+    common::{Vertex, size_of_var},
     mesh::Mesh,
     offset_of,
     pipeline::new_graphics_pipeline,

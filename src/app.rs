@@ -1,4 +1,7 @@
-use crate::{camera::{Camera, CameraBuilder}, scene::Scene};
+use crate::{
+    camera::{Camera, CameraBuilder},
+    scene::Scene,
+};
 use ::winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
