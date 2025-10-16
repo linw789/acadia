@@ -1,5 +1,5 @@
 use ::ash::{Device, vk};
-use ::glam::{Mat4, Vec3, vec3};
+use ::glam::{Mat4, Vec3, vec3, vec4};
 use ::winit::{
     dpi::PhysicalSize,
     event_loop::{ControlFlow, EventLoop},
@@ -16,13 +16,19 @@ use acadia::{
     renderer::{MAX_FRAMES_IN_FLIGHT, Renderer},
     scene::Scene,
     shader::Program,
-    texture::Texture,
 };
 use std::rc::Rc;
 
-const SHADOW_PASS_PER_FRAME_UNIFORM_DATA_SIZE: usize = 80;
 const LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
-const SHADOW_DEBUG_PASS_PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
+
+#[derive(Default)]
+struct ShadowPass {
+    program: Program,
+    pipeline: vk::Pipeline,
+    desc_sets: Vec<vk::DescriptorSet>,
+    per_frame_uniform_buf: Buffer,
+    shadow_depth_image_handle: u32,
+}
 
 #[derive(Default)]
 struct ShadowViewPass {
@@ -34,14 +40,254 @@ struct ShadowViewPass {
     index_buf: Buffer,
     index_count: u32,
 
-    shadow_depth_texture: Texture,
+    shadow_depth_image_view: vk::ImageView,
+    shadow_depth_image_sampler: vk::Sampler,
+}
+
+#[derive(Default)]
+struct LightPass {
+    program: Program,
+    pipeline: vk::Pipeline,
+    desc_sets: Vec<vk::DescriptorSet>,
+}
+
+impl ShadowPass {
+    const PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
+
+    fn new(renderer: &Renderer, shadow_depth_image_handle: u32) -> Self {
+        let program = Program::new(
+            &renderer.vkbase.device,
+            vk::PipelineBindPoint::GRAPHICS,
+            vec![Rc::clone(
+                renderer
+                    .shader_set
+                    .get("shadow-test/shadow-pass.vert")
+                    .unwrap(),
+            )],
+        );
+
+        let pipeline = {
+            let vertex_binding_descs = [vk::VertexInputBindingDescription::default()
+                .binding(0)
+                .stride(size_of::<Vertex>() as u32)
+                .input_rate(vk::VertexInputRate::VERTEX)];
+            let vertex_attrib_descs = [vk::VertexInputAttributeDescription {
+                location: 0,
+                binding: 0,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(Vertex, pos) as u32,
+            }];
+            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
+                .vertex_binding_descriptions(&vertex_binding_descs)
+                .vertex_attribute_descriptions(&vertex_attrib_descs);
+
+            let color_blend_state =
+                vk::PipelineColorBlendStateCreateInfo::default().attachments(&[]);
+
+            new_graphics_pipeline(
+                &renderer.vkbase.device,
+                &vertex_input_state,
+                true,
+                &[],
+                renderer.vkbase.depth_format,
+                &color_blend_state,
+                &program,
+            )
+        };
+
+        let per_frame_uniform_buf = {
+            let per_frame_uniform_buf_total_size =
+                Self::PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
+            Buffer::new(
+                &renderer.vkbase.device,
+                per_frame_uniform_buf_total_size as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                &renderer.vkbase.device_memory_properties,
+            )
+        };
+
+        let desc_sets = {
+            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .set_layouts(program.desc_set_layouts())
+                .descriptor_pool(renderer.desc_pool);
+
+            unsafe {
+                let desc_sets = renderer
+                    .vkbase
+                    .device
+                    .allocate_descriptor_sets(&desc_set_alloc_info)
+                    .unwrap();
+
+                let desc_buf_infos = [vk::DescriptorBufferInfo::default()
+                    .buffer(per_frame_uniform_buf.buf)
+                    .offset(0)
+                    .range(Self::PER_FRAME_UNIFORM_DATA_SIZE as u64)];
+                let desc_writes = [vk::WriteDescriptorSet::default()
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                    .dst_set(desc_sets[0])
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .buffer_info(&desc_buf_infos)];
+                renderer
+                    .vkbase
+                    .device
+                    .update_descriptor_sets(&desc_writes, &[]);
+
+                desc_sets
+            }
+        };
+
+        Self {
+            program,
+            pipeline,
+            desc_sets,
+            per_frame_uniform_buf,
+            shadow_depth_image_handle,
+        }
+    }
+
+    fn update_light_projection(&self, in_flight_frame_index: usize, light_proj: &Mat4) {
+        self.per_frame_uniform_buf.copy_value(
+            in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE,
+            &light_proj,
+        );
+    }
+
+    fn draw(&mut self, renderer: &Renderer, mesh: &Mesh, shadow_depth_image_size: vk::Extent2D) {
+        let shadow_depth_image = renderer
+            .image_pool
+            .get_at_index(self.shadow_depth_image_handle);
+
+        let depth_image_layout_barriers = [vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+            .src_access_mask(vk::AccessFlags2::NONE)
+            .dst_stage_mask(vk::PipelineStageFlags2::VERTEX_SHADER)
+            .dst_access_mask(vk::AccessFlags2::SHADER_WRITE)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(shadow_depth_image.image)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::DEPTH,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            })];
+        let pre_rendering_dependencies =
+            vk::DependencyInfo::default().image_memory_barriers(&depth_image_layout_barriers);
+
+        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(shadow_depth_image.view)
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 0.0,
+                    stencil: 0,
+                },
+            });
+
+        let image_extent = renderer.vkbase.swapchain.image_extent();
+
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: image_extent,
+            })
+            .layer_count(1)
+            .depth_attachment(&depth_attachment_info);
+
+        let viewport = vk::Viewport::default()
+            .x(0.0)
+            .y(0.0)
+            .width(shadow_depth_image_size.width as f32)
+            .height(shadow_depth_image_size.height as f32)
+            .min_depth(0.0)
+            .max_depth(1.0);
+        let scissor: vk::Rect2D = shadow_depth_image_size.into();
+
+        unsafe {
+            let cmd_buf = renderer.curr_cmd_cuf();
+
+            renderer
+                .vkbase
+                .device
+                .cmd_pipeline_barrier2(cmd_buf, &pre_rendering_dependencies);
+
+            renderer
+                .vkbase
+                .device
+                .cmd_begin_rendering(cmd_buf, &rendering_info);
+
+            renderer.vkbase.device.cmd_bind_pipeline(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline,
+            );
+
+            renderer
+                .vkbase
+                .device
+                .cmd_set_viewport(cmd_buf, 0, &[viewport]);
+            renderer
+                .vkbase
+                .device
+                .cmd_set_scissor(cmd_buf, 0, &[scissor]);
+
+            renderer.vkbase.device.cmd_bind_vertex_buffers(
+                cmd_buf,
+                0,
+                &[mesh.vertex_buffer.buf],
+                &[0],
+            );
+            renderer.vkbase.device.cmd_bind_index_buffer(
+                cmd_buf,
+                mesh.index_buffer.buf,
+                0,
+                vk::IndexType::UINT32,
+            );
+
+            renderer.vkbase.device.cmd_bind_descriptor_sets(
+                cmd_buf,
+                self.program.bind_point,
+                self.program.pipeline_layout,
+                0,
+                &self.desc_sets,
+                &[
+                    (renderer.in_flight_frame_index() * LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE)
+                        as u32,
+                ],
+            );
+
+            for submesh in &mesh.submeshes {
+                renderer.vkbase.device.cmd_draw_indexed(
+                    cmd_buf,
+                    submesh.index_count,
+                    1,
+                    submesh.index_offset,
+                    submesh.vertex_offset,
+                    1,
+                );
+            }
+
+            renderer.vkbase.device.cmd_end_rendering(cmd_buf);
+        }
+    }
+
+    fn destruct(&mut self, device: &Device) {
+        self.per_frame_uniform_buf.destruct(device);
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+        }
+        self.program.destruct(device);
+    }
 }
 
 impl ShadowViewPass {
-    fn new(
-        renderer: &Renderer,
-        shadow_depth_image_handle: u32,
-    ) -> Self {
+    fn new(renderer: &Renderer, shadow_depth_image_handle: u32) -> Self {
         let program = Program::new(
             &renderer.vkbase.device,
             vk::PipelineBindPoint::GRAPHICS,
@@ -102,8 +348,56 @@ impl ShadowViewPass {
             )
         };
 
-        let shadow_depth_texture = Texture::new(&renderer.vkbase.device, shadow_depth_image_handle);
         let shadow_depth_image = renderer.image_pool.get_at_index(shadow_depth_image_handle);
+
+        let shadow_depth_image_view = {
+            let view_createinfo = vk::ImageViewCreateInfo::default()
+                .image(shadow_depth_image.image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(vk::Format::D32_SFLOAT)
+                .components(vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::IDENTITY,
+                    g: vk::ComponentSwizzle::IDENTITY,
+                    b: vk::ComponentSwizzle::IDENTITY,
+                    a: vk::ComponentSwizzle::IDENTITY,
+                })
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::DEPTH,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            unsafe {
+                renderer
+                    .vkbase
+                    .device
+                    .create_image_view(&view_createinfo, None)
+                    .unwrap()
+            }
+        };
+
+        let shadow_depth_image_sampler = {
+            let sampler_createinfo = vk::SamplerCreateInfo::default()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::REPEAT)
+                .address_mode_v(vk::SamplerAddressMode::REPEAT)
+                .address_mode_w(vk::SamplerAddressMode::REPEAT)
+                .mip_lod_bias(0.0)
+                .anisotropy_enable(false)
+                .compare_enable(false)
+                .compare_op(vk::CompareOp::ALWAYS);
+
+            unsafe {
+                renderer
+                    .vkbase
+                    .device
+                    .create_sampler(&sampler_createinfo, None)
+                    .unwrap()
+            }
+        };
 
         let desc_sets = if program.desc_set_layouts().len() > 0 {
             let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
@@ -118,14 +412,14 @@ impl ShadowViewPass {
                     .unwrap();
 
                 let desc_image_infos = [vk::DescriptorImageInfo::default()
-                    .sampler(shadow_depth_texture.sampler)
-                    .image_view(shadow_depth_image.view)
+                    .sampler(shadow_depth_image_sampler)
+                    .image_view(shadow_depth_image_view)
                     .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
 
                 let desc_writes = [vk::WriteDescriptorSet::default()
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .dst_set(desc_sets[0])
-                    .dst_binding(1)
+                    .dst_binding(0)
                     .dst_array_element(0)
                     .image_info(&desc_image_infos)];
                 renderer
@@ -192,11 +486,12 @@ impl ShadowViewPass {
             vertex_buf,
             index_buf,
             index_count,
-            shadow_depth_texture,
+            shadow_depth_image_sampler,
+            shadow_depth_image_view,
         }
     }
 
-    fn draw(&self, renderer: &Renderer) {
+    fn draw(&self, renderer: &Renderer, depth_shadow_image_handle: u32) {
         let color_attachment_infos = [vk::RenderingAttachmentInfo::default()
             .image_view(renderer.present_image_view())
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -240,8 +535,34 @@ impl ShadowViewPass {
         };
         let scissor: vk::Rect2D = image_extent.into();
 
+        let shadow_depth_image = renderer.image_pool.get_at_index(depth_shadow_image_handle);
+        let depth_image_layout_barrier = [vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+            .src_access_mask(vk::AccessFlags2::NONE)
+            .dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
+            .dst_access_mask(vk::AccessFlags2::SHADER_READ)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(shadow_depth_image.image)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::DEPTH,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            })];
+        let pre_rendering_dependencies =
+            vk::DependencyInfo::default().image_memory_barriers(&depth_image_layout_barrier);
+
         unsafe {
             let cmd_buf = renderer.curr_cmd_cuf();
+
+            renderer
+                .vkbase
+                .device
+                .cmd_pipeline_barrier2(cmd_buf, &pre_rendering_dependencies);
 
             renderer
                 .vkbase
@@ -283,30 +604,27 @@ impl ShadowViewPass {
                     self.program.pipeline_layout,
                     0,
                     &self.desc_sets,
-                    &[(renderer.in_flight_frame_index()
-                        * SHADOW_DEBUG_PASS_PER_FRAME_UNIFORM_DATA_SIZE)
-                        as u32],
+                    &[],
                 );
             }
 
-            renderer.vkbase.device.cmd_draw_indexed(
-                cmd_buf,
-                self.index_count,
-                1,
-                0,
-                0,
-                1,
-            );
+            renderer
+                .vkbase
+                .device
+                .cmd_draw_indexed(cmd_buf, self.index_count, 1, 0, 0, 1);
 
             renderer.vkbase.device.cmd_end_rendering(cmd_buf);
         }
     }
 
     fn destruct(&mut self, device: &Device) {
-        self.shadow_depth_texture.destruct(device);
         self.index_buf.destruct(device);
         self.vertex_buf.destruct(device);
-        unsafe { device.destroy_pipeline(self.pipeline, None); }
+        unsafe {
+            device.destroy_image_view(self.shadow_depth_image_view, None);
+            device.destroy_sampler(self.shadow_depth_image_sampler, None);
+            device.destroy_pipeline(self.pipeline, None);
+        }
         self.program.destruct(device);
     }
 }
@@ -315,132 +633,25 @@ impl ShadowViewPass {
 struct ShadowTest {
     renderer: Option<Renderer>,
 
+    shadow_pass: ShadowPass,
     shadow_view_pass: ShadowViewPass,
 
-    shadow_pass_program: Program,
     light_pass_program: Program,
 
-    shadow_mesh: Mesh,
-
+    mesh: Mesh,
     light_dir: Vec3,
 
     shadow_depth_image_size: vk::Extent2D,
     shadow_depth_image_handle: u32,
 
-    shadow_pass_per_frame_uniform_buf: Buffer,
     light_pass_per_frame_uniform_buf: Buffer,
 
-    shadow_pipeline: vk::Pipeline,
-    shadow_desc_set: vk::DescriptorSet,
     light_pipeline: vk::Pipeline,
     light_desc_set: vk::DescriptorSet,
 }
 
 impl ShadowTest {
-    fn draw_shadow_pass(&mut self) {
-        let renderer = self.renderer.as_mut().unwrap();
-
-        renderer.begin_frame();
-
-        let shadow_depth_image = renderer
-            .image_pool
-            .get_at_index(self.shadow_depth_image_handle);
-        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
-            .image_view(shadow_depth_image.view)
-            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 0.0,
-                    stencil: 0,
-                },
-            });
-
-        let image_extent = renderer.vkbase.swapchain.image_extent();
-
-        let rendering_info = vk::RenderingInfo::default()
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: image_extent,
-            })
-            .layer_count(1)
-            .depth_attachment(&depth_attachment_info);
-
-        let viewport = vk::Viewport::default()
-            .x(0.0)
-            .y(0.0)
-            .width(self.shadow_depth_image_size.width as f32)
-            .height(self.shadow_depth_image_size.height as f32)
-            .min_depth(0.0)
-            .max_depth(1.0);
-        let scissor: vk::Rect2D = self.shadow_depth_image_size.into();
-
-        unsafe {
-            let cmd_buf = renderer.curr_cmd_cuf();
-
-            renderer
-                .vkbase
-                .device
-                .cmd_begin_rendering(cmd_buf, &rendering_info);
-
-            renderer.vkbase.device.cmd_bind_pipeline(
-                cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.shadow_pipeline,
-            );
-
-            renderer
-                .vkbase
-                .device
-                .cmd_set_viewport(cmd_buf, 0, &[viewport]);
-            renderer
-                .vkbase
-                .device
-                .cmd_set_scissor(cmd_buf, 0, &[scissor]);
-
-            renderer.vkbase.device.cmd_bind_vertex_buffers(
-                cmd_buf,
-                0,
-                &[self.shadow_mesh.vertex_buffer.buf],
-                &[0],
-            );
-            renderer.vkbase.device.cmd_bind_index_buffer(
-                cmd_buf,
-                self.shadow_mesh.index_buffer.buf,
-                0,
-                vk::IndexType::UINT32,
-            );
-
-            renderer.vkbase.device.cmd_bind_descriptor_sets(
-                cmd_buf,
-                self.light_pass_program.bind_point,
-                self.light_pass_program.pipeline_layout,
-                0,
-                &[self.light_desc_set],
-                &[
-                    (renderer.in_flight_frame_index() * LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE)
-                        as u32,
-                ],
-            );
-
-            for submesh in &self.shadow_mesh.submeshes {
-                renderer.vkbase.device.cmd_draw_indexed(
-                    cmd_buf,
-                    submesh.index_count,
-                    1,
-                    submesh.index_offset,
-                    submesh.vertex_offset,
-                    1,
-                );
-            }
-
-            renderer.vkbase.device.cmd_end_rendering(cmd_buf);
-        }
-
-        renderer.end_frame();
-    }
-
+    /*
     fn draw_light_pass(&mut self) {
         let renderer = self.renderer.as_mut().unwrap();
 
@@ -553,24 +764,13 @@ impl ShadowTest {
 
         renderer.end_frame();
     }
+    */
 }
 
 impl Scene for ShadowTest {
     fn init(&mut self, window: &Window) {
         let mut renderer = Renderer::new(window);
 
-        // self.shadow_pass_program = Program::new(
-        //     &renderer.vkbase.device,
-        //     vk::PipelineBindPoint::GRAPHICS,
-        //     vec![
-        //         Rc::clone(
-        //             renderer
-        //                 .shader_set
-        //                 .get("shadow-test/shadow-pass.vert")
-        //                 .unwrap(),
-        //         ),
-        //     ],
-        // );
         // self.light_pass_program = Program::new(
         //     &renderer.vkbase.device,
         //     vk::PipelineBindPoint::GRAPHICS,
@@ -590,7 +790,7 @@ impl Scene for ShadowTest {
         //     ],
         // );
 
-        self.shadow_mesh = Mesh::from_obj(
+        self.mesh = Mesh::from_obj(
             &renderer.vkbase.device,
             &renderer.vkbase.device_memory_properties,
             "assets/meshes/shadow-test.obj",
@@ -606,17 +806,6 @@ impl Scene for ShadowTest {
             .image_pool
             .new_depth_image(self.shadow_depth_image_size, renderer.vkbase.depth_format);
 
-        self.shadow_pass_per_frame_uniform_buf = {
-            let per_frame_uniform_buf_total_size =
-                SHADOW_PASS_PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
-            Buffer::new(
-                &renderer.vkbase.device,
-                per_frame_uniform_buf_total_size as u64,
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-                &renderer.vkbase.device_memory_properties,
-            )
-        };
-
         self.light_pass_per_frame_uniform_buf = {
             let per_frame_uniform_buf_total_size =
                 LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
@@ -629,34 +818,6 @@ impl Scene for ShadowTest {
         };
 
         /*
-        self.shadow_pipeline = {
-            let vertex_binding_descs = [vk::VertexInputBindingDescription::default()
-                .binding(0)
-                .stride(size_of::<Vertex>() as u32)
-                .input_rate(vk::VertexInputRate::VERTEX)];
-            let vertex_attrib_descs = [vk::VertexInputAttributeDescription {
-                location: 0,
-                binding: 0,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Vertex, pos) as u32,
-            }];
-            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-                .vertex_binding_descriptions(&vertex_binding_descs)
-                .vertex_attribute_descriptions(&vertex_attrib_descs);
-
-            let color_blend_state =
-                vk::PipelineColorBlendStateCreateInfo::default().attachments(&[]);
-
-            new_graphics_pipeline(
-                &renderer.vkbase.device,
-                &vertex_input_state,
-                true,
-                &[],
-                renderer.vkbase.depth_format,
-                &color_blend_state,
-                &self.shadow_pass_program,
-            )
-        };
 
         self.light_pipeline = {
             let vertex_binding_descs = [vk::VertexInputBindingDescription::default()
@@ -705,37 +866,6 @@ impl Scene for ShadowTest {
             )
         };
 
-        self.shadow_desc_set = {
-            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
-                .set_layouts(self.shadow_pass_program.desc_set_layouts())
-                .descriptor_pool(renderer.desc_pool);
-
-            unsafe {
-                let desc_set = renderer
-                    .vkbase
-                    .device
-                    .allocate_descriptor_sets(&desc_set_alloc_info)
-                    .unwrap()[0];
-
-                let desc_buf_infos = [vk::DescriptorBufferInfo::default()
-                    .buffer(self.shadow_pass_per_frame_uniform_buf.buf)
-                    .offset(0)
-                    .range(SHADOW_PASS_PER_FRAME_UNIFORM_DATA_SIZE as u64)];
-                let desc_writes = [vk::WriteDescriptorSet::default()
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
-                    .dst_set(self.shadow_desc_set)
-                    .dst_binding(0)
-                    .dst_array_element(0)
-                    .buffer_info(&desc_buf_infos)];
-                renderer
-                    .vkbase
-                    .device
-                    .update_descriptor_sets(&desc_writes, &[]);
-
-                desc_set
-            }
-        };
-
         self.light_desc_set = {
             let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
                 .set_layouts(self.light_pass_program.desc_set_layouts())
@@ -768,6 +898,7 @@ impl Scene for ShadowTest {
         };
         */
 
+        self.shadow_pass = ShadowPass::new(&renderer, self.shadow_depth_image_handle);
         self.shadow_view_pass = ShadowViewPass::new(&renderer, self.shadow_depth_image_handle);
 
         self.renderer = Some(renderer);
@@ -789,9 +920,31 @@ impl Scene for ShadowTest {
         // self.light_pass_per_frame_uniform_buf
         //     .copy_value(uniform_data_offset, &self.light_dir);
 
+        let light_proj = {
+            let width = self.shadow_depth_image_size.width;
+            let height = self.shadow_depth_image_size.height;
+            let nearz = 0.1;
+            let farz = 59.0;
+
+            let m = Mat4::from_cols(
+                vec4(1.0 / width as f32, 0.0, 0.0, 0.0),
+                vec4(0.0, 1.0 / height as f32, 0.0, 0.0),
+                vec4(0.0, 0.0, -1.0 / (farz - nearz), 0.0),
+                vec4(0.0, 0.0, farz / (farz - nearz), 1.0),
+            );
+
+            m
+        };
+
+        self.shadow_pass
+            .update_light_projection(renderer.in_flight_frame_index(), &light_proj);
+
         renderer.begin_frame();
 
-        self.shadow_view_pass.draw(renderer);
+        self.shadow_pass
+            .draw(renderer, &self.mesh, self.shadow_depth_image_size);
+        self.shadow_view_pass
+            .draw(renderer, self.shadow_depth_image_handle);
 
         renderer.end_frame();
     }
@@ -806,26 +959,14 @@ impl Scene for ShadowTest {
     }
 
     fn destruct(&mut self) {
-
+        let device = &self.renderer.as_ref().unwrap().vkbase.device;
         unsafe {
-            let device = &self.renderer.as_ref().unwrap().vkbase.device;
             device.device_wait_idle().unwrap();
-
-            self.shadow_view_pass.destruct(device);
-
-            device.destroy_pipeline(self.light_pipeline, None);
-            device.destroy_pipeline(self.shadow_pipeline, None);
         }
 
-        {
-            let device = &self.renderer.as_ref().unwrap().vkbase.device;
-
-            self.shadow_pass_program.destruct(device);
-            self.light_pass_program.destruct(device);
-            self.light_pass_per_frame_uniform_buf.destruct(device);
-
-            self.shadow_mesh.destruct(device);
-        }
+        self.mesh.destruct(device);
+        self.shadow_view_pass.destruct(device);
+        self.shadow_pass.destruct(device);
 
         self.renderer.as_mut().unwrap().destruct();
     }

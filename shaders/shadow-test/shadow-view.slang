@@ -20,8 +20,8 @@ VertexOutput vertex_main(AssembledVertex assembled) {
     return output;
 }
 
-// [[vk::binding(0, 1)]]
-// Sampler2D shadow_depth_sampler;
+[[vk::binding(0, 0)]]
+Sampler2D<float> shadow_depth_sampler;
 
 struct Fragment {
     float4 color;
@@ -29,9 +29,9 @@ struct Fragment {
 
 [shader("fragment")]
 Fragment fragment_main(FragmentInput frag_input: FragmentInput) {
-    // float4 texel = shadow_depth_sampler.Sample(frag_input.uv);
+    float depth = shadow_depth_sampler.Sample(frag_input.uv);
 
     Fragment fragment;
-    fragment.color = float4(frag_input.uv, 0.0, 1.0);
+    fragment.color = float4(depth, depth, depth, 1.0);
     return fragment;
 }
