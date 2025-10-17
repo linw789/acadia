@@ -57,12 +57,15 @@ pub fn load_shaders<P: AsRef<Path>>(
             let shader = Shader::new(device, &shader_path);
             let mut shader_path = shader_path;
             shader_path.set_extension("");
-            let shader_name = shader_path
+            let mut shader_name = shader_path
                 .strip_prefix(&root_dir)
                 .unwrap()
                 .to_str()
                 .unwrap()
                 .to_owned();
+            if std::path::MAIN_SEPARATOR == '\\' {
+                shader_name = shader_name.replace('\\', "/");
+            }
             shader_set.insert(shader_name, Rc::new(shader));
         }
     }
