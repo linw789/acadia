@@ -1,5 +1,5 @@
 use ::ash::{Device, vk};
-use ::glam::{Mat4, Vec3, vec3, vec4};
+use ::glam::{Mat4, Vec3, vec2, vec3};
 use ::winit::{
     dpi::PhysicalSize,
     event_loop::{ControlFlow, EventLoop},
@@ -9,7 +9,8 @@ use acadia::{
     app::App,
     buffer::Buffer,
     camera::Camera,
-    common::{Vertex, Vertex2D},
+    common::{Vertex, Vertex2D, size_of_var},
+    light::DirectionalLight,
     mesh::Mesh,
     offset_of,
     pipeline::new_graphics_pipeline,
@@ -31,6 +32,14 @@ struct ShadowPass {
 }
 
 #[derive(Default)]
+struct LightPass {
+    program: Program,
+    pipeline: vk::Pipeline,
+    desc_sets: Vec<vk::DescriptorSet>,
+    uniform_buf: Buffer,
+}
+
+#[derive(Default)]
 struct ShadowViewPass {
     program: Program,
     pipeline: vk::Pipeline,
@@ -42,13 +51,6 @@ struct ShadowViewPass {
 
     shadow_depth_image_view: vk::ImageView,
     shadow_depth_image_sampler: vk::Sampler,
-}
-
-#[derive(Default)]
-struct LightPass {
-    program: Program,
-    pipeline: vk::Pipeline,
-    desc_sets: Vec<vk::DescriptorSet>,
 }
 
 impl ShadowPass {
@@ -149,7 +151,7 @@ impl ShadowPass {
     fn update_light_projection(&self, in_flight_frame_index: usize, light_proj: &Mat4) {
         self.per_frame_uniform_buf.copy_value(
             in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE,
-            &light_proj,
+            light_proj,
         );
     }
 
@@ -193,12 +195,10 @@ impl ShadowPass {
                 },
             });
 
-        let image_extent = renderer.vkbase.swapchain.image_extent();
-
         let rendering_info = vk::RenderingInfo::default()
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: image_extent,
+                extent: shadow_depth_image_size,
             })
             .layer_count(1)
             .depth_attachment(&depth_attachment_info);
@@ -285,6 +285,255 @@ impl ShadowPass {
         unsafe {
             device.destroy_pipeline(self.pipeline, None);
         }
+        self.program.destruct(device);
+    }
+}
+
+impl LightPass {
+    const PER_FRAME_UNIFORM_DATA_SIZE: usize = 80;
+
+    fn new(renderer: &Renderer) -> Self {
+        let program = Program::new(
+            &renderer.vkbase.device,
+            vk::PipelineBindPoint::GRAPHICS,
+            vec![
+                Rc::clone(
+                    renderer
+                        .shader_set
+                        .get("shadow-test/light-pass.vert")
+                        .unwrap(),
+                ),
+                Rc::clone(
+                    renderer
+                        .shader_set
+                        .get("shadow-test/light-pass.frag")
+                        .unwrap(),
+                ),
+            ],
+        );
+
+        let pipeline = {
+            let vertex_binding_descs = [vk::VertexInputBindingDescription::default()
+                .binding(0)
+                .stride(size_of::<Vertex>() as u32)
+                .input_rate(vk::VertexInputRate::VERTEX)];
+
+            let vertex_attrib_descs = [
+                vk::VertexInputAttributeDescription {
+                    location: 0,
+                    binding: 0,
+                    format: vk::Format::R32G32B32_SFLOAT,
+                    offset: offset_of!(Vertex, pos) as u32,
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 1,
+                    binding: 0,
+                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    offset: offset_of!(Vertex, color) as u32,
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 2,
+                    binding: 0,
+                    format: vk::Format::R32G32B32_SFLOAT,
+                    offset: offset_of!(Vertex, normal) as u32,
+                },
+            ];
+            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
+                .vertex_binding_descriptions(&vertex_binding_descs)
+                .vertex_attribute_descriptions(&vertex_attrib_descs);
+
+            let color_attachment_state = [vk::PipelineColorBlendAttachmentState::default()
+                .blend_enable(false)
+                .color_write_mask(vk::ColorComponentFlags::RGBA)];
+            let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+                .attachments(&color_attachment_state);
+
+            new_graphics_pipeline(
+                &renderer.vkbase.device,
+                &vertex_input_state,
+                true,
+                &[renderer.vkbase.surface_format.format],
+                renderer.vkbase.depth_format,
+                &color_blend_state,
+                &program,
+            )
+        };
+
+        let uniform_buf = {
+            let per_frame_uniform_buf_total_size =
+                Self::PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
+            Buffer::new(
+                &renderer.vkbase.device,
+                per_frame_uniform_buf_total_size as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                &renderer.vkbase.device_memory_properties,
+            )
+        };
+
+        let desc_sets = {
+            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .set_layouts(program.desc_set_layouts())
+                .descriptor_pool(renderer.desc_pool);
+
+            unsafe {
+                let desc_sets = renderer
+                    .vkbase
+                    .device
+                    .allocate_descriptor_sets(&desc_set_alloc_info)
+                    .unwrap();
+
+                let desc_buf_infos = [vk::DescriptorBufferInfo::default()
+                    .buffer(uniform_buf.buf)
+                    .offset(0)
+                    .range(Self::PER_FRAME_UNIFORM_DATA_SIZE as u64)];
+                let desc_writes = [vk::WriteDescriptorSet::default()
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                    .dst_set(desc_sets[0])
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .buffer_info(&desc_buf_infos)];
+                renderer
+                    .vkbase
+                    .device
+                    .update_descriptor_sets(&desc_writes, &[]);
+
+                desc_sets
+            }
+        };
+
+        Self {
+            program,
+            pipeline,
+            desc_sets,
+            uniform_buf,
+        }
+    }
+
+    fn update_uniform_buf(
+        &self,
+        in_flight_frame_index: usize,
+        light_proj: &Mat4,
+        light_dir: &Vec3,
+    ) {
+        let mut offset = in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE;
+        self.uniform_buf.copy_value(offset, &light_proj);
+
+        offset += size_of_var(light_proj);
+        self.uniform_buf.copy_value(offset, &light_dir);
+    }
+
+    fn draw(&mut self, renderer: &Renderer, mesh: &Mesh) {
+        let color_attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(renderer.present_image_view())
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
+                },
+            });
+        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(renderer.depth_image_view())
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 0.0,
+                    stencil: 0,
+                },
+            });
+
+        let image_extent = renderer.vkbase.swapchain.image_extent();
+
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: image_extent,
+            })
+            .layer_count(1)
+            .color_attachments(std::slice::from_ref(&color_attachment_info))
+            .depth_attachment(&depth_attachment_info);
+
+        let viewport = vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: image_extent.width as f32,
+            height: image_extent.height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+        let scissor: vk::Rect2D = image_extent.into();
+
+        unsafe {
+            let cmd_buf = renderer.curr_cmd_cuf();
+
+            renderer
+                .vkbase
+                .device
+                .cmd_begin_rendering(cmd_buf, &rendering_info);
+
+            renderer.vkbase.device.cmd_bind_pipeline(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline,
+            );
+
+            renderer
+                .vkbase
+                .device
+                .cmd_set_viewport(cmd_buf, 0, &[viewport]);
+            renderer
+                .vkbase
+                .device
+                .cmd_set_scissor(cmd_buf, 0, &[scissor]);
+
+            renderer.vkbase.device.cmd_bind_vertex_buffers(
+                cmd_buf,
+                0,
+                &[mesh.vertex_buffer.buf],
+                &[0],
+            );
+            renderer.vkbase.device.cmd_bind_index_buffer(
+                cmd_buf,
+                mesh.index_buffer.buf,
+                0,
+                vk::IndexType::UINT32,
+            );
+
+            renderer.vkbase.device.cmd_bind_descriptor_sets(
+                cmd_buf,
+                self.program.bind_point,
+                self.program.pipeline_layout,
+                0,
+                &self.desc_sets,
+                &[
+                    (renderer.in_flight_frame_index() * LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE)
+                        as u32,
+                ],
+            );
+
+            for submesh in &mesh.submeshes {
+                renderer.vkbase.device.cmd_draw_indexed(
+                    cmd_buf,
+                    submesh.index_count,
+                    1,
+                    submesh.index_offset,
+                    submesh.vertex_offset,
+                    1,
+                );
+            }
+
+            renderer.vkbase.device.cmd_end_rendering(cmd_buf);
+        }
+    }
+
+    fn destruct(&mut self, device: &Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+        }
+        self.uniform_buf.destruct(device);
         self.program.destruct(device);
     }
 }
@@ -498,24 +747,8 @@ impl ShadowViewPass {
         let color_attachment_infos = [vk::RenderingAttachmentInfo::default()
             .image_view(renderer.present_image_view())
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
-                },
-            })];
-        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
-            .image_view(renderer.depth_image_view())
-            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 0.0,
-                    stencil: 0,
-                },
-            });
+            .load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .store_op(vk::AttachmentStoreOp::STORE)];
 
         let image_extent = renderer.vkbase.swapchain.image_extent();
 
@@ -525,8 +758,7 @@ impl ShadowViewPass {
                 extent: image_extent,
             })
             .layer_count(1)
-            .color_attachments(&color_attachment_infos)
-            .depth_attachment(&depth_attachment_info);
+            .color_attachments(&color_attachment_infos);
 
         let viewport = vk::Viewport {
             x: 0.0,
@@ -640,161 +872,19 @@ struct ShadowTest {
     renderer: Option<Renderer>,
 
     shadow_pass: ShadowPass,
+    light_pass: LightPass,
     shadow_view_pass: ShadowViewPass,
 
-    light_pass_program: Program,
-
     mesh: Mesh,
-    light_dir: Vec3,
+    light: DirectionalLight,
 
     shadow_depth_image_size: vk::Extent2D,
     shadow_depth_image_handle: u32,
-
-    light_pass_per_frame_uniform_buf: Buffer,
-
-    light_pipeline: vk::Pipeline,
-    light_desc_set: vk::DescriptorSet,
-}
-
-impl ShadowTest {
-    /*
-    fn draw_light_pass(&mut self) {
-        let renderer = self.renderer.as_mut().unwrap();
-
-        renderer.begin_frame();
-
-        let color_attachment_infos = [vk::RenderingAttachmentInfo::default()
-            .image_view(renderer.present_image_view())
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
-                },
-            })];
-        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
-            .image_view(renderer.depth_image_view())
-            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 0.0,
-                    stencil: 0,
-                },
-            });
-
-        let image_extent = renderer.vkbase.swapchain.image_extent();
-
-        let rendering_info = vk::RenderingInfo::default()
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: image_extent,
-            })
-            .layer_count(1)
-            .color_attachments(&color_attachment_infos)
-            .depth_attachment(&depth_attachment_info);
-
-        let viewport = vk::Viewport {
-            x: 0.0,
-            y: 0.0,
-            width: image_extent.width as f32,
-            height: image_extent.height as f32,
-            min_depth: 0.0,
-            max_depth: 1.0,
-        };
-        let scissor: vk::Rect2D = image_extent.into();
-
-        unsafe {
-            let cmd_buf = renderer.curr_cmd_cuf();
-
-            renderer
-                .vkbase
-                .device
-                .cmd_begin_rendering(cmd_buf, &rendering_info);
-
-            renderer.vkbase.device.cmd_bind_pipeline(
-                cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.light_pipeline,
-            );
-
-            renderer
-                .vkbase
-                .device
-                .cmd_set_viewport(cmd_buf, 0, &[viewport]);
-            renderer
-                .vkbase
-                .device
-                .cmd_set_scissor(cmd_buf, 0, &[scissor]);
-
-            renderer.vkbase.device.cmd_bind_vertex_buffers(
-                cmd_buf,
-                0,
-                &[self.shadow_mesh.vertex_buffer.buf],
-                &[0],
-            );
-            renderer.vkbase.device.cmd_bind_index_buffer(
-                cmd_buf,
-                self.shadow_mesh.index_buffer.buf,
-                0,
-                vk::IndexType::UINT32,
-            );
-
-            renderer.vkbase.device.cmd_bind_descriptor_sets(
-                cmd_buf,
-                self.light_pass_program.bind_point,
-                self.light_pass_program.pipeline_layout,
-                0,
-                &[self.light_desc_set],
-                &[
-                    (renderer.in_flight_frame_index() * LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE)
-                        as u32,
-                ],
-            );
-
-            for submesh in &self.shadow_mesh.submeshes {
-                renderer.vkbase.device.cmd_draw_indexed(
-                    cmd_buf,
-                    submesh.index_count,
-                    1,
-                    submesh.index_offset,
-                    submesh.vertex_offset,
-                    1,
-                );
-            }
-
-            renderer.vkbase.device.cmd_end_rendering(cmd_buf);
-        }
-
-        renderer.end_frame();
-    }
-    */
 }
 
 impl Scene for ShadowTest {
     fn init(&mut self, window: &Window) {
         let mut renderer = Renderer::new(window);
-
-        // self.light_pass_program = Program::new(
-        //     &renderer.vkbase.device,
-        //     vk::PipelineBindPoint::GRAPHICS,
-        //     vec![
-        //         Rc::clone(
-        //             renderer
-        //                 .shader_set
-        //                 .get("shadow-test/light-pass.vert")
-        //                 .unwrap(),
-        //         ),
-        //         Rc::clone(
-        //             renderer
-        //                 .shader_set
-        //                 .get("shadow-test/light-pass.frag")
-        //                 .unwrap(),
-        //         ),
-        //     ],
-        // );
 
         self.mesh = Mesh::from_obj(
             &renderer.vkbase.device,
@@ -802,7 +892,11 @@ impl Scene for ShadowTest {
             "assets/meshes/shadow-test.obj",
         );
 
-        self.light_dir = vec3(-1.0, -1.0, 0.0);
+        self.light = DirectionalLight::new(
+            vec3(25.0, 25.0, 0.0),
+            vec3(-1.0, -1.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+        );
 
         self.shadow_depth_image_size = vk::Extent2D {
             width: 2048,
@@ -812,99 +906,8 @@ impl Scene for ShadowTest {
             .image_pool
             .new_depth_image(self.shadow_depth_image_size, renderer.vkbase.depth_format);
 
-        self.light_pass_per_frame_uniform_buf = {
-            let per_frame_uniform_buf_total_size =
-                LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT;
-            Buffer::new(
-                &renderer.vkbase.device,
-                per_frame_uniform_buf_total_size as u64,
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-                &renderer.vkbase.device_memory_properties,
-            )
-        };
-
-        /*
-
-        self.light_pipeline = {
-            let vertex_binding_descs = [vk::VertexInputBindingDescription::default()
-                .binding(0)
-                .stride(size_of::<Vertex>() as u32)
-                .input_rate(vk::VertexInputRate::VERTEX)];
-
-            let vertex_attrib_descs = [
-                vk::VertexInputAttributeDescription {
-                    location: 0,
-                    binding: 0,
-                    format: vk::Format::R32G32B32_SFLOAT,
-                    offset: offset_of!(Vertex, pos) as u32,
-                },
-                vk::VertexInputAttributeDescription {
-                    location: 1,
-                    binding: 0,
-                    format: vk::Format::R32G32B32A32_SFLOAT,
-                    offset: offset_of!(Vertex, color) as u32,
-                },
-                vk::VertexInputAttributeDescription {
-                    location: 2,
-                    binding: 0,
-                    format: vk::Format::R32G32B32_SFLOAT,
-                    offset: offset_of!(Vertex, normal) as u32,
-                },
-            ];
-            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-                .vertex_binding_descriptions(&vertex_binding_descs)
-                .vertex_attribute_descriptions(&vertex_attrib_descs);
-
-            let color_attachment_state = [vk::PipelineColorBlendAttachmentState::default()
-                .blend_enable(false)
-                .color_write_mask(vk::ColorComponentFlags::RGBA)];
-            let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-                .attachments(&color_attachment_state);
-
-            new_graphics_pipeline(
-                &renderer.vkbase.device,
-                &vertex_input_state,
-                true,
-                &[renderer.vkbase.surface_format.format],
-                renderer.vkbase.depth_format,
-                &color_blend_state,
-                &self.light_pass_program,
-            )
-        };
-
-        self.light_desc_set = {
-            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
-                .set_layouts(self.light_pass_program.desc_set_layouts())
-                .descriptor_pool(renderer.desc_pool);
-
-            unsafe {
-                let desc_set = renderer
-                    .vkbase
-                    .device
-                    .allocate_descriptor_sets(&desc_set_alloc_info)
-                    .unwrap()[0];
-
-                let desc_buf_infos = [vk::DescriptorBufferInfo::default()
-                    .buffer(self.light_pass_per_frame_uniform_buf.buf)
-                    .offset(0)
-                    .range(LIGHT_PASS_PER_FRAME_UNIFORM_DATA_SIZE as u64)];
-                let desc_writes = [vk::WriteDescriptorSet::default()
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
-                    .dst_set(self.light_desc_set)
-                    .dst_binding(0)
-                    .dst_array_element(0)
-                    .buffer_info(&desc_buf_infos)];
-                renderer
-                    .vkbase
-                    .device
-                    .update_descriptor_sets(&desc_writes, &[]);
-
-                desc_set
-            }
-        };
-        */
-
         self.shadow_pass = ShadowPass::new(&renderer, self.shadow_depth_image_handle);
+        self.light_pass = LightPass::new(&renderer);
         self.shadow_view_pass = ShadowViewPass::new(&renderer, self.shadow_depth_image_handle);
 
         self.renderer = Some(renderer);
@@ -926,29 +929,28 @@ impl Scene for ShadowTest {
         // self.light_pass_per_frame_uniform_buf
         //     .copy_value(uniform_data_offset, &self.light_dir);
 
-        let light_proj = {
-            let width = self.shadow_depth_image_size.width;
-            let height = self.shadow_depth_image_size.height;
-            let nearz = 0.1;
-            let farz = 59.0;
-
-            let m = Mat4::from_cols(
-                vec4(1.0 / width as f32, 0.0, 0.0, 0.0),
-                vec4(0.0, 1.0 / height as f32, 0.0, 0.0),
-                vec4(0.0, 0.0, -1.0 / (farz - nearz), 0.0),
-                vec4(0.0, 0.0, farz / (farz - nearz), 1.0),
-            );
-
-            m
-        };
+        let light_proj_view_size = vec2(
+            self.shadow_depth_image_size.width as f32,
+            self.shadow_depth_image_size.height as f32,
+        );
+        let light_proj = self.light.projection_matrix(light_proj_view_size);
 
         self.shadow_pass
             .update_light_projection(renderer.in_flight_frame_index(), &light_proj);
+
+        self.light_pass.update_uniform_buf(
+            renderer.in_flight_frame_index(),
+            &light_proj,
+            &self.light.direction,
+        );
 
         renderer.begin_frame();
 
         self.shadow_pass
             .draw(renderer, &self.mesh, self.shadow_depth_image_size);
+
+        self.light_pass.draw(renderer, &self.mesh);
+
         self.shadow_view_pass
             .draw(renderer, self.shadow_depth_image_handle);
 
@@ -972,6 +974,7 @@ impl Scene for ShadowTest {
 
         self.mesh.destruct(device);
         self.shadow_view_pass.destruct(device);
+        self.light_pass.destruct(device);
         self.shadow_pass.destruct(device);
 
         self.renderer.as_mut().unwrap().destruct();
@@ -991,5 +994,4 @@ fn main() {
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let _result = event_loop.run_app(&mut app);
-    println!("run_app: {:?}", _result);
 }

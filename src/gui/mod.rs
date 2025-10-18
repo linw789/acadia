@@ -1,6 +1,6 @@
 pub mod font;
 
-use crate::{buffer::Buffer, common::Vertex2D, image::ImagePool, texture::Texture};
+use crate::{buffer::Buffer, common::Vertex2D, texture::Texture};
 use ash::{Device, vk};
 use font::FontBitmap;
 use glam::{Vec2, Vec4, vec2};

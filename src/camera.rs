@@ -1,5 +1,9 @@
 use glam::{Mat3, Mat4, Vec3, vec3};
-use std::{f32::consts::PI, io::Error, io::ErrorKind, result::Result};
+use std::{
+    f32::consts::PI,
+    io::{Error, ErrorKind},
+    result::Result,
+};
 
 pub struct Camera {
     position: Vec3,

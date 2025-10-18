@@ -6,7 +6,6 @@ ConstantBuffer<PerFrame> per_frame;
 
 struct AssembledVertex {
     float3 position;
-    float3 normal;
 }
 
 struct VertexOutput {
@@ -17,6 +16,6 @@ struct VertexOutput {
 VertexOutput vertex_main(AssembledVertex assembled) {
     VertexOutput output;
     output.position = mul(per_frame.light_projection_matrix, float4(assembled.position, 1.0));
-    output.position.zw = float2(0.5, 1.0);
+    // output.position.zw = float2(0.4, 1.0);
     return output;
 }

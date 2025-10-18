@@ -1,4 +1,4 @@
-use crate::{image::Image, swapchain::Swapchain};
+use crate::swapchain::Swapchain;
 use ash::{Device, Entry, Instance, ext::debug_utils, khr, vk};
 use std::{borrow::Cow, error::Error, ffi, os::raw::c_char, sync::Arc};
 use winit::{

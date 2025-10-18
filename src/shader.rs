@@ -12,8 +12,6 @@ pub struct Shader {
     pub stage: vk::ShaderStageFlags,
     pub shader_module: vk::ShaderModule,
     descriptor_infos: Vec<DescriptorInfo>,
-    use_descriptor_array: bool,
-    use_push_constants: bool,
 }
 
 #[derive(Default)]
@@ -89,8 +87,6 @@ impl Shader {
             stage: vk::ShaderStageFlags::VERTEX,
             descriptor_infos: Vec::new(),
             shader_module,
-            use_descriptor_array: false,
-            use_push_constants: false,
         };
 
         shader.parse_spv(&spv_code);
