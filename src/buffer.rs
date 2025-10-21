@@ -69,15 +69,10 @@ impl Buffer {
         self.buf = vk::Buffer::null();
     }
 
-    pub fn copy_slice<T>(&self, offset: usize, slice: &[T]) {
-        assert!(self.size >= (offset + size_of::<T>() * slice.len()) as u64);
-        unsafe {
-            let dst_ptr = (self.ptr as *mut u8).add(offset) as *mut T;
-            copy_nonoverlapping(slice.as_ptr(), dst_ptr, slice.len());
-        }
-    }
-
-    pub fn copy_value<T>(&self, offset: usize, data: &T) {
+    /// The `'static` constraint prevents `data` from being a temporary value of a reference type,
+    /// but not if `data` is a static reference. `data` should never be a reference, so this is not
+    /// perfect.
+    pub fn copy_value<T: 'static>(&self, offset: usize, data: &T) {
         assert!(
             self.size >= (offset + size_of::<T>()) as u64,
             "buffer size: {}, offset: {}, data size: {}",
@@ -88,6 +83,14 @@ impl Buffer {
         unsafe {
             let dst_ptr = (self.ptr as *mut u8).add(offset) as *mut T;
             copy_nonoverlapping(data as *const T, dst_ptr, 1);
+        }
+    }
+
+    pub fn copy_slice<T: 'static>(&self, offset: usize, slice: &[T]) {
+        assert!(self.size >= (offset + size_of::<T>() * slice.len()) as u64);
+        unsafe {
+            let dst_ptr = (self.ptr as *mut u8).add(offset) as *mut T;
+            copy_nonoverlapping(slice.as_ptr(), dst_ptr, slice.len());
         }
     }
 }

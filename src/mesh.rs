@@ -4,7 +4,7 @@ use glam::Vec3;
 use std::{convert::AsRef, path::Path, vec::Vec};
 use tobj::{GPU_LOAD_OPTIONS, Model, load_obj};
 
-pub struct Bounds {
+pub struct Aabb {
     pub min: Vec3,
     pub max: Vec3,
 }
@@ -14,7 +14,7 @@ pub struct SubMesh {
     pub index_count: u32,
     pub index_offset: u32,
     pub vertex_offset: i32,
-    pub bounds: Bounds,
+    pub bounds: Aabb,
 }
 
 #[derive(Default)]
@@ -22,6 +22,7 @@ pub struct Mesh {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub submeshes: Vec<SubMesh>,
+    pub bounds: Aabb,
 }
 
 impl Mesh {
@@ -45,6 +46,11 @@ impl Mesh {
         let mut vertices = Vec::with_capacity(total_vertex_count);
         let mut indices = Vec::with_capacity(total_index_count);
 
+        let mut model_bounds = Aabb {
+            min: Vec3::MAX,
+            max: Vec3::MIN,
+        };
+
         // Value added to each vertex index by GPU before indexing into vertex buffer.
         let mut vertex_offset = 0;
         let mut index_offset = 0;
@@ -52,7 +58,7 @@ impl Mesh {
             let vertex_count = mesh.positions.len() / 3;
             let index_count = mesh.indices.len();
 
-            let mut bounds = Bounds {
+            let mut bounds = Aabb {
                 min: Vec3::MAX,
                 max: Vec3::MIN,
             };
@@ -102,6 +108,8 @@ impl Mesh {
 
             indices.extend(mesh.indices);
 
+            model_bounds.extend(&bounds);
+
             submeshes.push(SubMesh {
                 index_count: index_count as u32,
                 index_offset,
@@ -133,6 +141,7 @@ impl Mesh {
             vertex_buffer,
             index_buffer,
             submeshes,
+            bounds: model_bounds,
         }
     }
 
@@ -142,14 +151,14 @@ impl Mesh {
     }
 }
 
-impl Bounds {
-    pub fn extend(&mut self, other: &Bounds) {
+impl Aabb {
+    pub fn extend(&mut self, other: &Aabb) {
         self.min = self.min.min(other.min);
         self.max = self.max.max(other.max);
     }
 }
 
-impl Default for Bounds {
+impl Default for Aabb {
     fn default() -> Self {
         Self {
             min: Vec3::ZERO,

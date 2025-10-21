@@ -26,6 +26,8 @@ pub struct Vertex2D {
     pub uv: [f32; 2],
 }
 
-pub fn size_of_var<T>(_var: &T) -> usize {
+/// `'static` constraint makes sure `T` can't be a reference type when `_var` is a temporary value.
+/// TODO: this is not ideal. Need to find a universal way to guarantee `T` not a reference type.
+pub fn size_of_var<T: 'static>(_var: &T) -> usize {
     size_of::<T>()
 }

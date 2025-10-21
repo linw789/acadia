@@ -1,5 +1,4 @@
 use ::ash::vk;
-use ::glam::Mat4;
 use ::winit::{
     dpi::PhysicalSize,
     event_loop::{ControlFlow, EventLoop},
@@ -204,20 +203,6 @@ impl Scene for Triangle {
             )
         };
 
-        self.desc_set = {
-            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
-                .set_layouts(self.program.desc_set_layouts())
-                .descriptor_pool(renderer.desc_pool);
-
-            unsafe {
-                renderer
-                    .vkbase
-                    .device
-                    .allocate_descriptor_sets(&desc_set_alloc_info)
-                    .unwrap()[0]
-            }
-        };
-
         self.per_frame_uniform_buf = {
             Buffer::new(
                 &renderer.vkbase.device,
@@ -227,22 +212,36 @@ impl Scene for Triangle {
             )
         };
 
-        unsafe {
-            let desc_buf_infos = [vk::DescriptorBufferInfo::default()
-                .buffer(self.per_frame_uniform_buf.buf)
-                .offset(0)
-                .range(PER_FRAME_UNIFORM_DATA_SIZE as u64)];
-            let desc_writes = [vk::WriteDescriptorSet::default()
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
-                .dst_set(self.desc_set)
-                .dst_binding(0)
-                .dst_array_element(0)
-                .buffer_info(&desc_buf_infos)];
-            renderer
-                .vkbase
-                .device
-                .update_descriptor_sets(&desc_writes, &[]);
-        }
+        self.desc_set = {
+            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .set_layouts(self.program.desc_set_layouts())
+                .descriptor_pool(renderer.desc_pool);
+
+            unsafe {
+                let desc_set = renderer
+                    .vkbase
+                    .device
+                    .allocate_descriptor_sets(&desc_set_alloc_info)
+                    .unwrap()[0];
+
+                let desc_buf_infos = [vk::DescriptorBufferInfo::default()
+                    .buffer(self.per_frame_uniform_buf.buf)
+                    .offset(0)
+                    .range(PER_FRAME_UNIFORM_DATA_SIZE as u64)];
+                let desc_writes = [vk::WriteDescriptorSet::default()
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                    .dst_set(desc_set)
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .buffer_info(&desc_buf_infos)];
+                renderer
+                    .vkbase
+                    .device
+                    .update_descriptor_sets(&desc_writes, &[]);
+
+                desc_set
+            }
+        };
 
         self.renderer = Some(renderer);
     }

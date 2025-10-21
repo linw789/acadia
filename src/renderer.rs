@@ -308,8 +308,8 @@ impl Renderer {
         self.frame_count += 1;
 
         // Because we need to use `in_flight_frame_index` before `begin_frame()` is called, we
-        // update it at the end of a frame. The first usage of `in_flight_frame_index` will be the
-        // initial value 0, which is fine.
+        // update it post frame_count increment. The first usage of `in_flight_frame_index`
+        // will be the initial value 0, which is fine.
         self.in_flight_frame_index = (self.frame_count % (MAX_FRAMES_IN_FLIGHT as u64)) as usize;
     }
 

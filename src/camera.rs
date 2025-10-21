@@ -125,7 +125,7 @@ impl Camera {
         // let r = Mat4::from_mat3(self.bases.inverse());
         // let t = Mat4::from_translation(-self.position);
         // r * t
-        // I suppose one inverse() operation is faster?
+        // Is Mat3::inverse() faster than Mat4::inverse()?
         let v = Mat4::from_translation(self.position) * Mat4::from_mat3(self.bases);
         v.inverse()
     }
