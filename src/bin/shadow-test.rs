@@ -299,7 +299,7 @@ impl ShadowPass {
 }
 
 impl LightPass {
-    const PER_FRAME_UNIFORM_DATA_SIZE: usize = 80;
+    const PER_FRAME_UNIFORM_DATA_SIZE: usize = 144;
 
     fn new(
         renderer: &Renderer,
@@ -439,10 +439,14 @@ impl LightPass {
     fn update_uniform_buf(
         &self,
         in_flight_frame_index: usize,
+        camera_proj: &Mat4,
         light_proj: &Mat4,
         light_dir: &Vec3,
     ) {
         let mut offset = in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE;
+        self.uniform_buf.copy_value(offset, camera_proj);
+
+        offset += size_of_var(camera_proj);
         self.uniform_buf.copy_value(offset, light_proj);
 
         offset += size_of_var(light_proj);
@@ -459,7 +463,8 @@ impl LightPass {
             .src_access_mask(vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE)
             .dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
             .dst_access_mask(vk::AccessFlags2::SHADER_READ)
-            .old_layout(vk::ImageLayout::UNDEFINED)
+            // NOTE, must set the old_layout to match the new_layout from the previous transition.
+            .old_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
             .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -934,6 +939,7 @@ impl Scene for ShadowTest {
         self.light_pass.update_uniform_buf(
             renderer.in_flight_frame_index(),
             &camera_proj,
+            &light_proj,
             &light_direction,
         );
 

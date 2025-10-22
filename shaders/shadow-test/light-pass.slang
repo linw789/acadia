@@ -44,9 +44,10 @@ struct Fragment {
 Fragment fragment_main(FragmentInput frag_input: FragmentInput) {
     float shading = max(dot(frag_input.normal, -per_frame.light_dir), 0.0);
     float4 pos_light_space = mul(per_frame.light_projection, float4(frag_input.position, 1.0));
-    float2 shadow_depth_uv = pos_light_space.xy / pos_light_space.w;
-    float max_depth = shadow_depth_sampler.Sample(shadow_depth_uv);
-    float shadow = pos_light_space.z >= max_depth;
+    float3 pos_light_ndc = pos_light_space.xyz / pos_light_space.w;
+    float2 depth_uv = (pos_light_ndc.xy + float2(1.0, 1.0)) / 2.0;
+    float depth = shadow_depth_sampler.Sample(depth_uv);
+    float shadow = pos_light_ndc.z > depth;
     
     Fragment fragment;
     fragment.color = float4(shading * frag_input.color.rgb * shadow, 1.0);
