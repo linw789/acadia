@@ -27,7 +27,7 @@ pub struct App {
 impl App {
     pub fn new(window_size: PhysicalSize<u32>, scene: Box<dyn Scene>) -> Self {
         let camera = CameraBuilder::new()
-            .position(vec3(0.0, 0.0, 5.0))
+            .position(vec3(-15.0, 5.0, 15.0))
             .up(vec3(0.0, 1.0, 0.0))
             .lookat(vec3(0.0, 0.0, 0.0))
             .fov_y(40.0 / 180.0 * std::f32::consts::PI)
