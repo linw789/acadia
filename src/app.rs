@@ -1,7 +1,4 @@
-use crate::{
-    camera::{Camera, CameraBuilder},
-    scene::Scene,
-};
+use crate::{camera::Camera, scene::Scene};
 use ::winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -25,16 +22,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(window_size: PhysicalSize<u32>, scene: Box<dyn Scene>) -> Self {
-        let camera = CameraBuilder::new()
-            .position(vec3(-15.0, 5.0, 15.0))
-            .up(vec3(0.0, 1.0, 0.0))
-            .lookat(vec3(0.0, 0.0, 0.0))
-            .fov_y(40.0 / 180.0 * std::f32::consts::PI)
-            .near_z(0.1)
-            .build()
-            .unwrap();
-
+    pub fn new(window_size: PhysicalSize<u32>, scene: Box<dyn Scene>, camera: Camera) -> Self {
         Self {
             window_size,
             window: None,

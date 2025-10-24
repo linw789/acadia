@@ -7,7 +7,7 @@ use ::winit::{
 use acadia::{
     app::App,
     buffer::Buffer,
-    camera::Camera,
+    camera::{Camera, CameraBuilder},
     common::{Vertex, size_of_var},
     mesh::Mesh,
     offset_of,
@@ -16,6 +16,7 @@ use acadia::{
     scene::Scene,
     shader::Program,
 };
+use glam::vec3;
 use std::rc::Rc;
 
 const PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
@@ -291,12 +292,21 @@ impl Scene for Triangle {
 }
 
 fn main() {
+    let camera = CameraBuilder::new()
+        .position(vec3(0.0, 0.0, 5.0))
+        .up(vec3(0.0, 1.0, 0.0))
+        .lookat(vec3(0.0, 0.0, 0.0))
+        .fov_y(40.0 / 180.0 * std::f32::consts::PI)
+        .near_z(0.1)
+        .build()
+        .unwrap();
     let mut app = App::new(
         PhysicalSize::<u32> {
             width: 1920,
             height: 1080,
         },
         Box::new(Triangle::default()),
+        camera,
     );
 
     let event_loop = EventLoop::new().unwrap();
