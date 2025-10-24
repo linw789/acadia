@@ -13,7 +13,7 @@ use acadia::{
     light::DirectionalLight,
     mesh::Mesh,
     offset_of,
-    pipeline::new_graphics_pipeline,
+    pipeline::PipelineBuilder,
     renderer::{MAX_FRAMES_IN_FLIGHT, Renderer},
     scene::Scene,
     shader::Program,
@@ -98,15 +98,15 @@ impl ShadowPass {
             let color_blend_state =
                 vk::PipelineColorBlendStateCreateInfo::default().attachments(&[]);
 
-            new_graphics_pipeline(
+            PipelineBuilder::new(
                 &renderer.vkbase.device,
-                &vertex_input_state,
-                true,
-                &[],
-                renderer.vkbase.depth_format,
-                &color_blend_state,
                 &program,
+                &vertex_input_state,
+                &[],
+                &color_blend_state,
             )
+            .depth_format(renderer.vkbase.depth_format)
+            .build()
         };
 
         let per_frame_uniform_buf = {
@@ -363,15 +363,15 @@ impl LightPass {
             let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
                 .attachments(&color_attachment_state);
 
-            new_graphics_pipeline(
+            PipelineBuilder::new(
                 &renderer.vkbase.device,
-                &vertex_input_state,
-                true,
-                &[renderer.vkbase.surface_format.format],
-                renderer.vkbase.depth_format,
-                &color_blend_state,
                 &program,
+                &vertex_input_state,
+                &[renderer.vkbase.surface_format.format],
+                &color_blend_state,
             )
+            .depth_format(renderer.vkbase.depth_format)
+            .build()
         };
 
         let uniform_buf = {
@@ -651,15 +651,14 @@ impl ShadowViewPass {
             let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
                 .attachments(&color_attachment_state);
 
-            new_graphics_pipeline(
+            PipelineBuilder::new(
                 &renderer.vkbase.device,
-                &vertex_input_state,
-                false,
-                &[renderer.vkbase.surface_format.format],
-                renderer.vkbase.depth_format,
-                &color_blend_state,
                 &program,
+                &vertex_input_state,
+                &[renderer.vkbase.surface_format.format],
+                &color_blend_state,
             )
+            .build()
         };
 
         let desc_sets = if program.desc_set_layouts().len() > 0 {

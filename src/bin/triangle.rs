@@ -11,7 +11,7 @@ use acadia::{
     common::{Vertex, size_of_var},
     mesh::Mesh,
     offset_of,
-    pipeline::new_graphics_pipeline,
+    pipeline::PipelineBuilder,
     renderer::{MAX_FRAMES_IN_FLIGHT, Renderer},
     scene::Scene,
     shader::Program,
@@ -192,15 +192,15 @@ impl Scene for Triangle {
             let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
                 .attachments(&color_attachment_state);
 
-            new_graphics_pipeline(
+            PipelineBuilder::new(
                 &renderer.vkbase.device,
-                &vertex_input_state,
-                true,
-                &[renderer.vkbase.surface_format.format],
-                renderer.vkbase.depth_format,
-                &color_blend_state,
                 &self.program,
+                &vertex_input_state,
+                &[renderer.vkbase.surface_format.format],
+                &color_blend_state,
             )
+            .depth_format(renderer.vkbase.depth_format)
+            .build()
         };
 
         self.per_frame_uniform_buf = {
