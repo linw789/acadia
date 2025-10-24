@@ -39,17 +39,50 @@ impl DirectionalLight {
         let bounding_points = [
             // bottom rectangle
             Vec4::from((scene_bounds.min, 1.0)),
-            vec4(scene_bounds.min.x, scene_bounds.min.y, scene_bounds.max.z, 1.0),
-            vec4(scene_bounds.max.x, scene_bounds.min.y, scene_bounds.max.z, 1.0),
-            vec4(scene_bounds.max.x, scene_bounds.min.y, scene_bounds.min.z, 1.0),
+            vec4(
+                scene_bounds.min.x,
+                scene_bounds.min.y,
+                scene_bounds.max.z,
+                1.0,
+            ),
+            vec4(
+                scene_bounds.max.x,
+                scene_bounds.min.y,
+                scene_bounds.max.z,
+                1.0,
+            ),
+            vec4(
+                scene_bounds.max.x,
+                scene_bounds.min.y,
+                scene_bounds.min.z,
+                1.0,
+            ),
             // top rectable
             Vec4::from((scene_bounds.max, 1.0)),
-            vec4(scene_bounds.max.x, scene_bounds.max.y, scene_bounds.min.z, 1.0),
-            vec4(scene_bounds.min.x, scene_bounds.max.y, scene_bounds.min.z, 1.0),
-            vec4(scene_bounds.min.x, scene_bounds.max.y, scene_bounds.max.z, 1.0),
+            vec4(
+                scene_bounds.max.x,
+                scene_bounds.max.y,
+                scene_bounds.min.z,
+                1.0,
+            ),
+            vec4(
+                scene_bounds.min.x,
+                scene_bounds.max.y,
+                scene_bounds.min.z,
+                1.0,
+            ),
+            vec4(
+                scene_bounds.min.x,
+                scene_bounds.max.y,
+                scene_bounds.max.z,
+                1.0,
+            ),
         ];
 
-        let mut bounds_light_space = Aabb { min: Vec3::MAX, max: Vec3::MIN };
+        let mut bounds_light_space = Aabb {
+            min: Vec3::MAX,
+            max: Vec3::MIN,
+        };
         for point in &bounding_points {
             // Transform bounding points into the light space.
             let p4 = view_matrix * point;
@@ -65,7 +98,7 @@ impl DirectionalLight {
             let bottom = bounds_light_space.min.y;
             let top = bounds_light_space.max.y;
             let nearz = bounds_light_space.max.z + margin;
-            let farz = bounds_light_space.min.z - margin; 
+            let farz = bounds_light_space.min.z - margin;
 
             Mat4::from_cols(
                 vec4(2.0 / (right - left), 0.0, 0.0, 0.0),
