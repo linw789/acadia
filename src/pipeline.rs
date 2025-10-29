@@ -3,6 +3,7 @@ use crate::{
     shader::Program,
 };
 use ash::{Device, vk};
+use arrayvec::ArrayVec;
 use std::vec::Vec;
 
 macro_rules! offset_of {
@@ -480,9 +481,8 @@ impl<'a> PipelineBuilder<'a> {
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .cull_mode(vk::CullModeFlags::BACK)
             .line_width(1.0)
-            .polygon_mode(vk::PolygonMode::FILL);
-        // TODO: what's depth bias?
-        // .depth_bias_enable(true);
+            .polygon_mode(vk::PolygonMode::FILL)
+            .depth_bias_enable(self.enable_dynamic_depth_bias);
 
         let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(vk::SampleCountFlags::TYPE_1);
@@ -492,7 +492,12 @@ impl<'a> PipelineBuilder<'a> {
             .depth_write_enable(self.depth_format.is_some())
             .depth_compare_op(vk::CompareOp::GREATER);
 
-        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+        let mut dynamic_states = ArrayVec::<_, 3>::new();
+        dynamic_states.push(vk::DynamicState::VIEWPORT);
+        dynamic_states.push(vk::DynamicState::SCISSOR);
+        if self.enable_dynamic_depth_bias {
+            dynamic_states.push(vk::DynamicState::DEPTH_BIAS);
+        }
         let dynamic_state =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 

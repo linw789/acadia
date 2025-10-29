@@ -106,6 +106,7 @@ impl ShadowPass {
                 &color_blend_state,
             )
             .depth_format(renderer.vkbase.depth_format)
+            .enable_dynamic_depth_bias(true)
             .build()
         };
 
@@ -251,6 +252,11 @@ impl ShadowPass {
                 .vkbase
                 .device
                 .cmd_set_scissor(cmd_buf, 0, &[scissor]);
+
+            renderer
+                .vkbase
+                .device
+                .cmd_set_depth_bias(cmd_buf, 1.25, 0.0, -1.75);
 
             renderer.vkbase.device.cmd_bind_vertex_buffers(
                 cmd_buf,
