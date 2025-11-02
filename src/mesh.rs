@@ -121,21 +121,19 @@ impl Mesh {
             index_offset += index_count as u32;
         }
 
-        let vertex_buffer = Buffer::new(
+        let vertex_buffer = Buffer::from_slice(
             device,
-            (size_of::<Vertex>() * vertices.len()) as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             memory_properties,
+            &vertices,
         );
-        vertex_buffer.copy_slice(0, &vertices);
 
-        let index_buffer = Buffer::new(
+        let index_buffer = Buffer::from_slice(
             device,
-            (size_of::<u32>() * total_index_count) as u64,
             vk::BufferUsageFlags::INDEX_BUFFER,
             memory_properties,
+            &indices,
         );
-        index_buffer.copy_slice(0, &indices);
 
         Self {
             vertex_buffer,

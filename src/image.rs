@@ -119,13 +119,12 @@ impl ImagePool {
     ) -> Vec<u32> {
         let mut staging_buffers = Vec::with_capacity(byte_slices.len());
         for (bytes, _ext) in byte_slices {
-            let buf = Buffer::new(
+            let buf = Buffer::from_slice(
                 &self.device,
-                bytes.len() as u64,
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 &self.device_memory_properties,
+                bytes,
             );
-            buf.copy_slice(0, bytes);
             staging_buffers.push(buf);
         }
 

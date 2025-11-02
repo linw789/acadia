@@ -161,7 +161,7 @@ impl ShadowPass {
         }
     }
 
-    fn update_light_projection(&self, in_flight_frame_index: usize, light_proj: &Mat4) {
+    fn update_light_projection(&mut self, in_flight_frame_index: usize, light_proj: &Mat4) {
         self.per_frame_uniform_buf.copy_value(
             in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE,
             light_proj,
@@ -443,20 +443,17 @@ impl LightPass {
     }
 
     fn update_uniform_buf(
-        &self,
+        &mut self,
         in_flight_frame_index: usize,
         camera_proj: &Mat4,
         light_proj: &Mat4,
         light_dir: &Vec3,
     ) {
-        let mut offset = in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE;
-        self.uniform_buf.copy_value(offset, camera_proj);
-
-        offset += size_of_var(camera_proj);
-        self.uniform_buf.copy_value(offset, light_proj);
-
-        offset += size_of_var(light_proj);
-        self.uniform_buf.copy_value(offset, light_dir);
+        let start_offset = (in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE) as u64;
+        let mut copy = self.uniform_buf.linear_copy(start_offset);
+        copy.copy_value(camera_proj);
+        copy.copy_value(light_proj);
+        copy.copy_value(light_dir);
     }
 
     fn draw(&mut self, renderer: &Renderer, mesh: &Mesh, shadow_depth_image_handle: u32) {
@@ -730,21 +727,19 @@ impl ShadowViewPass {
 
         let indices = [0, 1, 3, 1, 2, 3];
 
-        let vertex_buf = Buffer::new(
+        let vertex_buf = Buffer::from_slice(
             &renderer.vkbase.device,
-            (size_of::<Vertex2D>() * vertices.len()) as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &renderer.vkbase.device_memory_properties,
+            &vertices,
         );
-        vertex_buf.copy_slice(0, &vertices);
 
-        let index_buf = Buffer::new(
+        let index_buf = Buffer::from_slice(
             &renderer.vkbase.device,
-            (size_of::<Vertex2D>() * indices.len()) as u64,
             vk::BufferUsageFlags::INDEX_BUFFER,
             &renderer.vkbase.device_memory_properties,
+            &indices,
         );
-        index_buf.copy_slice(0, &indices);
         let index_count = indices.len() as u32;
 
         Self {
