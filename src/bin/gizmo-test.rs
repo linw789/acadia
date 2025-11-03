@@ -17,7 +17,7 @@ use acadia::{
     shader::Program,
 };
 use glam::{Mat4, Vec3, vec3};
-use std::{rc::Rc, f32::consts::PI};
+use std::{f32::consts::PI, rc::Rc};
 
 #[repr(C, packed)]
 struct GizmoAxisInstance {

@@ -2,8 +2,8 @@ use crate::{
     common::{Vertex, Vertex2D},
     shader::Program,
 };
-use ash::{Device, vk};
 use arrayvec::ArrayVec;
+use ash::{Device, vk};
 use std::vec::Vec;
 
 macro_rules! offset_of {

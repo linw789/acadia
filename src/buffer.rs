@@ -157,6 +157,5 @@ impl<'a> BufferLinearCopy<'a> {
         self.offset += (size_of::<T>() * slice.len()) as u64;
     }
 
-    pub fn done(self) {
-    }
+    pub fn done(self) {}
 }
