@@ -420,6 +420,7 @@ pub struct PipelineBuilder<'a> {
     color_attachment_formats: &'a [vk::Format],
     color_blend_state: &'a vk::PipelineColorBlendStateCreateInfo<'a>,
     depth_format: Option<vk::Format>,
+    topology: vk::PrimitiveTopology,
     enable_dynamic_depth_bias: bool,
 }
 
@@ -438,6 +439,7 @@ impl<'a> PipelineBuilder<'a> {
             color_attachment_formats,
             color_blend_state,
             depth_format: None,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
             enable_dynamic_depth_bias: false,
         }
     }
@@ -449,6 +451,11 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn enable_dynamic_depth_bias(mut self, enable: bool) -> Self {
         self.enable_dynamic_depth_bias = enable;
+        self
+    }
+
+    pub fn topology(mut self, topology: vk::PrimitiveTopology) -> Self {
+        self.topology = topology;
         self
     }
 
@@ -467,7 +474,7 @@ impl<'a> PipelineBuilder<'a> {
             .collect();
 
         let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+            .topology(self.topology);
 
         // Because we use dynamic viewport, we can pass a dummy viewport and scissor to create-info to
         // make Vulkan validation layer happy.
