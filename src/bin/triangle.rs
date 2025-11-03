@@ -134,7 +134,7 @@ impl Triangle {
                     1,
                     submesh.index_offset,
                     submesh.vertex_offset,
-                    1,
+                    0,
                 );
             }
 

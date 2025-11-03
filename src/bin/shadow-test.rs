@@ -829,7 +829,7 @@ impl ShadowViewPass {
             renderer
                 .vkbase
                 .device
-                .cmd_draw_indexed(cmd_buf, self.index_count, 1, 0, 0, 1);
+                .cmd_draw_indexed(cmd_buf, self.index_count, 1, 0, 0, 0);
 
             renderer.vkbase.device.cmd_end_rendering(cmd_buf);
         }
