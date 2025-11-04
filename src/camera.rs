@@ -6,7 +6,7 @@ use std::{
 };
 
 pub struct Camera {
-    position: Vec3,
+    pub position: Vec3,
     bases: Mat3,
     rotation_world_y: f32,
     rotation_local_x: f32,

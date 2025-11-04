@@ -1,4 +1,4 @@
-use ::ash::vk;
+use ::ash::{Device, vk};
 use ::winit::{
     dpi::PhysicalSize,
     event_loop::{ControlFlow, EventLoop},
@@ -20,35 +20,228 @@ use glam::{Mat4, Vec3, vec3};
 use std::{f32::consts::PI, rc::Rc};
 
 #[repr(C, packed)]
-struct GizmoAxisInstance {
+struct GizmoArrowInstance {
     id: u32,
     color: Vec3,
     transform: Mat4,
 }
 
 #[derive(Default)]
-struct GizmoTest {
-    renderer: Option<Renderer>,
+struct GizmoArrowPass {
     program: Program,
-    triangle: Mesh,
     arrow: Mesh,
-
     pipeline: vk::Pipeline,
-    desc_set: vk::DescriptorSet,
-
-    per_frame_uniform_buf: Buffer,
+    desc_sets: Vec<vk::DescriptorSet>,
+    uniform_buf: Buffer,
     instance_data_buffer: Buffer,
 }
 
-const PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
-const INSTANCE_COUNT: usize = 3;
+#[derive(Default)]
+struct GizmoTest {
+    renderer: Option<Renderer>,
+    triangle: Mesh,
+    gizmo_arrow: GizmoArrowPass,
+}
 
-impl GizmoTest {
-    fn draw_frame(&mut self) {
-        let renderer = self.renderer.as_mut().unwrap();
+impl GizmoArrowPass {
+    const PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
+    const INSTANCE_COUNT: usize = 3;
 
-        renderer.begin_frame();
+    fn new(renderer: &Renderer) -> Self {
+        let program = Program::new(
+            &renderer.vkbase.device,
+            vk::PipelineBindPoint::GRAPHICS,
+            vec![
+                Rc::clone(renderer.shader_set.get("gizmo.vert").unwrap()),
+                Rc::clone(renderer.shader_set.get("gizmo.frag").unwrap()),
+            ],
+        );
+        let arrow = Mesh::from_obj(
+            &renderer.vkbase.device,
+            &renderer.vkbase.device_memory_properties,
+            "assets/meshes/gizmo-arrow.obj",
+        );
 
+        let pipeline = {
+            let vertex_binding_descs = [
+                vk::VertexInputBindingDescription::default()
+                    .binding(0)
+                    .stride(size_of::<Vertex>() as u32)
+                    .input_rate(vk::VertexInputRate::VERTEX),
+                vk::VertexInputBindingDescription::default()
+                    .binding(1)
+                    .stride(size_of::<GizmoArrowInstance>() as u32)
+                    .input_rate(vk::VertexInputRate::INSTANCE),
+            ];
+
+            let vertex_attrib_descs = [
+                // per-vertex attributes
+                vk::VertexInputAttributeDescription {
+                    location: 0,
+                    binding: 0,
+                    format: vk::Format::R32G32B32_SFLOAT,
+                    offset: offset_of!(Vertex, pos) as u32,
+                },
+                // per-instance attributes
+                vk::VertexInputAttributeDescription {
+                    location: 1,
+                    binding: 1,
+                    format: vk::Format::R32_UINT,
+                    offset: offset_of!(GizmoArrowInstance, id) as u32,
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 2,
+                    binding: 1,
+                    format: vk::Format::R32G32B32_SFLOAT,
+                    offset: offset_of!(GizmoArrowInstance, color) as u32,
+                },
+                // The first column of the transform matrix.
+                vk::VertexInputAttributeDescription {
+                    location: 3,
+                    binding: 1,
+                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    offset: offset_of!(GizmoArrowInstance, transform) as u32,
+                },
+                // The second column of the transform matrix.
+                vk::VertexInputAttributeDescription {
+                    location: 4,
+                    binding: 1,
+                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    offset: (offset_of!(GizmoArrowInstance, transform) as u32) + 16,
+                },
+                // The third column of the transform matrix.
+                vk::VertexInputAttributeDescription {
+                    location: 5,
+                    binding: 1,
+                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    offset: (offset_of!(GizmoArrowInstance, transform) as u32) + 32,
+                },
+                // The fourth column of the transform matrix.
+                vk::VertexInputAttributeDescription {
+                    location: 6,
+                    binding: 1,
+                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    offset: (offset_of!(GizmoArrowInstance, transform) as u32) + 48,
+                },
+            ];
+
+            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
+                .vertex_binding_descriptions(&vertex_binding_descs)
+                .vertex_attribute_descriptions(&vertex_attrib_descs);
+
+            let color_attachment_state = [vk::PipelineColorBlendAttachmentState::default()
+                .blend_enable(false)
+                .color_write_mask(vk::ColorComponentFlags::RGBA)];
+
+            let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+                .attachments(&color_attachment_state);
+
+            PipelineBuilder::new(
+                &renderer.vkbase.device,
+                &program,
+                &vertex_input_state,
+                &[renderer.vkbase.surface_format.format],
+                &color_blend_state,
+            )
+            .depth_format(renderer.vkbase.depth_format)
+            .build()
+        };
+
+        let uniform_buf = {
+            Buffer::new(
+                &renderer.vkbase.device,
+                (Self::PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT) as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                &renderer.vkbase.device_memory_properties,
+            )
+        };
+
+        let instance_data_buffer = Buffer::new(
+            &renderer.vkbase.device,
+            (size_of::<GizmoArrowInstance>() * Self::INSTANCE_COUNT) as u64,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            &renderer.vkbase.device_memory_properties,
+        );
+
+        let desc_sets = {
+            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .set_layouts(program.desc_set_layouts())
+                .descriptor_pool(renderer.desc_pool);
+
+            unsafe {
+                let desc_sets = renderer
+                    .vkbase
+                    .device
+                    .allocate_descriptor_sets(&desc_set_alloc_info)
+                    .unwrap();
+
+                let desc_buf_infos = [vk::DescriptorBufferInfo::default()
+                    .buffer(uniform_buf.buf)
+                    .offset(0)
+                    .range(Self::PER_FRAME_UNIFORM_DATA_SIZE as u64)];
+                let desc_writes = [vk::WriteDescriptorSet::default()
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                    .dst_set(desc_sets[0])
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .buffer_info(&desc_buf_infos)];
+                renderer
+                    .vkbase
+                    .device
+                    .update_descriptor_sets(&desc_writes, &[]);
+
+                desc_sets
+            }
+        };
+
+        Self {
+            program,
+            arrow,
+            pipeline,
+            desc_sets,
+            uniform_buf,
+            instance_data_buffer,
+        }
+    }
+
+    fn update(&mut self, in_flight_frame_index: usize, pers_view_matrix: &Mat4) {
+        let per_frame_uniform_data_offset =
+            in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE;
+        self.uniform_buf
+            .copy_value(per_frame_uniform_data_offset, pers_view_matrix);
+
+        let scale = 0.5;
+        let position = vec3(0.0, 0.0, 0.0);
+        let translation = Mat4::from_translation(position);
+        let scale = Mat4::from_scale(vec3(scale, scale, scale));
+
+        let x_arrow_id = 0;
+        let x_arrow_color = vec3(1.0, 0.0, 0.0);
+        let x_arrow_transform = translation * Mat4::from_rotation_z(-0.5 * PI) * scale;
+
+        let y_arrow_id = 1;
+        let y_arrow_color = vec3(0.0, 1.0, 0.0);
+        let y_arrow_transform = translation * scale;
+
+        let z_arrow_id = 2;
+        let z_arrow_color = vec3(0.0, 0.0, 1.0);
+        let z_arrow_transform = translation * Mat4::from_rotation_x(0.5 * PI) * scale;
+
+        let mut linear_copy = self.instance_data_buffer.linear_copy(0);
+        linear_copy.copy_value(&x_arrow_id);
+        linear_copy.copy_value(&x_arrow_color);
+        linear_copy.copy_value(&x_arrow_transform);
+
+        linear_copy.copy_value(&y_arrow_id);
+        linear_copy.copy_value(&y_arrow_color);
+        linear_copy.copy_value(&y_arrow_transform);
+
+        linear_copy.copy_value(&z_arrow_id);
+        linear_copy.copy_value(&z_arrow_color);
+        linear_copy.copy_value(&z_arrow_transform);
+    }
+
+    fn draw(&self, renderer: &Renderer) {
         let color_attachment_infos = [vk::RenderingAttachmentInfo::default()
             .image_view(renderer.present_image_view())
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -139,15 +332,15 @@ impl GizmoTest {
                 self.program.bind_point,
                 self.program.pipeline_layout,
                 0,
-                &[self.desc_set],
-                &[(renderer.in_flight_frame_index() * PER_FRAME_UNIFORM_DATA_SIZE) as u32],
+                &self.desc_sets,
+                &[(renderer.in_flight_frame_index() * Self::PER_FRAME_UNIFORM_DATA_SIZE) as u32],
             );
 
             for submesh in &self.arrow.submeshes {
                 renderer.vkbase.device.cmd_draw_indexed(
                     cmd_buf,
                     submesh.index_count,
-                    INSTANCE_COUNT as u32,
+                    Self::INSTANCE_COUNT as u32,
                     submesh.index_offset,
                     submesh.vertex_offset,
                     0,
@@ -156,195 +349,28 @@ impl GizmoTest {
 
             renderer.vkbase.device.cmd_end_rendering(cmd_buf);
         }
-
-        renderer.end_frame();
     }
 
-    fn update_instance_data_buffer(&self, position: Vec3, scale: f32) {
-        let translation = Mat4::from_translation(position);
-        let scale = Mat4::from_scale(vec3(scale, scale, scale));
-
-        let x_arrow_id = 0;
-        let x_arrow_color = vec3(1.0, 0.0, 0.0);
-        let x_arrow_transform = translation * Mat4::from_rotation_z(-0.5 * PI) * scale;
-
-        let y_arrow_id = 1;
-        let y_arrow_color = vec3(0.0, 1.0, 0.0);
-        let y_arrow_transform = translation * scale;
-
-        let z_arrow_id = 2;
-        let z_arrow_color = vec3(0.0, 0.0, 1.0);
-        let z_arrow_transform = translation * Mat4::from_rotation_x(0.5 * PI) * scale;
-
-        let mut linear_copy = self.instance_data_buffer.linear_copy(0);
-        linear_copy.copy_value(&x_arrow_id);
-        linear_copy.copy_value(&x_arrow_color);
-        linear_copy.copy_value(&x_arrow_transform);
-
-        linear_copy.copy_value(&y_arrow_id);
-        linear_copy.copy_value(&y_arrow_color);
-        linear_copy.copy_value(&y_arrow_transform);
-
-        linear_copy.copy_value(&z_arrow_id);
-        linear_copy.copy_value(&z_arrow_color);
-        linear_copy.copy_value(&z_arrow_transform);
+    fn destruct(&mut self, device: &Device) {
+        self.instance_data_buffer.destruct(device);
+        self.uniform_buf.destruct(device);
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+        }
+        self.arrow.destruct(device);
+        self.program.destruct(device);
     }
 }
 
 impl Scene for GizmoTest {
     fn init(&mut self, window: &Window) {
         let renderer = Renderer::new(window);
-        self.program = Program::new(
-            &renderer.vkbase.device,
-            vk::PipelineBindPoint::GRAPHICS,
-            vec![
-                Rc::clone(renderer.shader_set.get("gizmo.vert").unwrap()),
-                Rc::clone(renderer.shader_set.get("gizmo.frag").unwrap()),
-            ],
-        );
-        self.arrow = Mesh::from_obj(
-            &renderer.vkbase.device,
-            &renderer.vkbase.device_memory_properties,
-            "assets/meshes/gizmo-arrow.obj",
-        );
-
-        self.pipeline = {
-            let vertex_binding_descs = [
-                vk::VertexInputBindingDescription::default()
-                    .binding(0)
-                    .stride(size_of::<Vertex>() as u32)
-                    .input_rate(vk::VertexInputRate::VERTEX),
-                vk::VertexInputBindingDescription::default()
-                    .binding(1)
-                    .stride(size_of::<GizmoAxisInstance>() as u32)
-                    .input_rate(vk::VertexInputRate::INSTANCE),
-            ];
-
-            let vertex_attrib_descs = [
-                // per-vertex attributes
-                vk::VertexInputAttributeDescription {
-                    location: 0,
-                    binding: 0,
-                    format: vk::Format::R32G32B32_SFLOAT,
-                    offset: offset_of!(Vertex, pos) as u32,
-                },
-                // per-instance attributes
-                vk::VertexInputAttributeDescription {
-                    location: 1,
-                    binding: 1,
-                    format: vk::Format::R32_UINT,
-                    offset: offset_of!(GizmoAxisInstance, id) as u32,
-                },
-                vk::VertexInputAttributeDescription {
-                    location: 2,
-                    binding: 1,
-                    format: vk::Format::R32G32B32_SFLOAT,
-                    offset: offset_of!(GizmoAxisInstance, color) as u32,
-                },
-                // The first column of the transform matrix.
-                vk::VertexInputAttributeDescription {
-                    location: 3,
-                    binding: 1,
-                    format: vk::Format::R32G32B32A32_SFLOAT,
-                    offset: offset_of!(GizmoAxisInstance, transform) as u32,
-                },
-                // The second column of the transform matrix.
-                vk::VertexInputAttributeDescription {
-                    location: 4,
-                    binding: 1,
-                    format: vk::Format::R32G32B32A32_SFLOAT,
-                    offset: (offset_of!(GizmoAxisInstance, transform) as u32) + 16,
-                },
-                // The third column of the transform matrix.
-                vk::VertexInputAttributeDescription {
-                    location: 5,
-                    binding: 1,
-                    format: vk::Format::R32G32B32A32_SFLOAT,
-                    offset: (offset_of!(GizmoAxisInstance, transform) as u32) + 32,
-                },
-                // The fourth column of the transform matrix.
-                vk::VertexInputAttributeDescription {
-                    location: 6,
-                    binding: 1,
-                    format: vk::Format::R32G32B32A32_SFLOAT,
-                    offset: (offset_of!(GizmoAxisInstance, transform) as u32) + 48,
-                },
-            ];
-
-            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-                .vertex_binding_descriptions(&vertex_binding_descs)
-                .vertex_attribute_descriptions(&vertex_attrib_descs);
-
-            let color_attachment_state = [vk::PipelineColorBlendAttachmentState::default()
-                .blend_enable(false)
-                .color_write_mask(vk::ColorComponentFlags::RGBA)];
-
-            let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-                .attachments(&color_attachment_state);
-
-            PipelineBuilder::new(
-                &renderer.vkbase.device,
-                &self.program,
-                &vertex_input_state,
-                &[renderer.vkbase.surface_format.format],
-                &color_blend_state,
-            )
-            .depth_format(renderer.vkbase.depth_format)
-            .build()
-        };
-
-        self.per_frame_uniform_buf = {
-            Buffer::new(
-                &renderer.vkbase.device,
-                (PER_FRAME_UNIFORM_DATA_SIZE * MAX_FRAMES_IN_FLIGHT) as u64,
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-                &renderer.vkbase.device_memory_properties,
-            )
-        };
-
-        self.instance_data_buffer = Buffer::new(
-            &renderer.vkbase.device,
-            (size_of::<GizmoAxisInstance>() * INSTANCE_COUNT) as u64,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            &renderer.vkbase.device_memory_properties,
-        );
-
-        self.desc_set = {
-            let desc_set_alloc_info = vk::DescriptorSetAllocateInfo::default()
-                .set_layouts(self.program.desc_set_layouts())
-                .descriptor_pool(renderer.desc_pool);
-
-            unsafe {
-                let desc_set = renderer
-                    .vkbase
-                    .device
-                    .allocate_descriptor_sets(&desc_set_alloc_info)
-                    .unwrap()[0];
-
-                let desc_buf_infos = [vk::DescriptorBufferInfo::default()
-                    .buffer(self.per_frame_uniform_buf.buf)
-                    .offset(0)
-                    .range(PER_FRAME_UNIFORM_DATA_SIZE as u64)];
-                let desc_writes = [vk::WriteDescriptorSet::default()
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
-                    .dst_set(desc_set)
-                    .dst_binding(0)
-                    .dst_array_element(0)
-                    .buffer_info(&desc_buf_infos)];
-                renderer
-                    .vkbase
-                    .device
-                    .update_descriptor_sets(&desc_writes, &[]);
-
-                desc_set
-            }
-        };
-
+        self.gizmo_arrow = GizmoArrowPass::new(&renderer);
         self.renderer = Some(renderer);
     }
 
     fn update(&mut self, camera: &Camera) {
-        let renderer = self.renderer.as_ref().unwrap();
+        let renderer = self.renderer.as_mut().unwrap();
 
         let distance_to_camera = camera.position.length();
         let dist_scale = distance_to_camera / 15.0;
@@ -355,16 +381,13 @@ impl Scene for GizmoTest {
         let pv_matrix = camera.ny_pers_view_matrix(image_aspect_ratio);
         let pvm = pv_matrix * scale_matrix;
 
-        assert!(PER_FRAME_UNIFORM_DATA_SIZE == size_of_var(&pvm));
+        self.gizmo_arrow.update(renderer.in_flight_frame_index(), &pvm);
 
-        let per_frame_uniform_data_offset =
-            renderer.in_flight_frame_index() * PER_FRAME_UNIFORM_DATA_SIZE;
-        self.per_frame_uniform_buf
-            .copy_value(per_frame_uniform_data_offset, &pvm);
+        renderer.begin_frame();
 
-        self.update_instance_data_buffer(vec3(0.0, 0.0, 0.0), 0.5);
+        self.gizmo_arrow.draw(renderer);
 
-        self.draw_frame();
+        renderer.end_frame();
     }
 
     fn resize(&mut self, size: PhysicalSize<u32>) {
@@ -380,15 +403,11 @@ impl Scene for GizmoTest {
         unsafe {
             let device = &self.renderer.as_ref().unwrap().vkbase.device;
             device.device_wait_idle().unwrap();
-            device.destroy_pipeline(self.pipeline, None);
         }
 
         {
             let device = &self.renderer.as_ref().unwrap().vkbase.device;
-            self.program.destruct(device);
-            self.per_frame_uniform_buf.destruct(device);
-            self.instance_data_buffer.destruct(device);
-            self.arrow.destruct(device);
+            self.gizmo_arrow.destruct(device);
         }
 
         self.renderer.as_mut().unwrap().destruct();
