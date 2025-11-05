@@ -1,0 +1,10 @@
+[ ] 3D transform gizmo
+    [x] Draw translation arrows
+    [x] Draw rotation circles
+    [ ] Hide the part of the circles that are behind the global.
+    [ ] Draw scale hammers.
+    [ ] Fade translation/scale gizmos if they become parallel to view direction.
+    [ ] Implement pixel-accurate picking of gizmos.
+    [ ] Update object's translation/scale based on the selected gizmo by mouse movement.
+    [ ] Update object's rotation.
+    [ ] Draw a pie on the rotation disk based on the rotation angle.
