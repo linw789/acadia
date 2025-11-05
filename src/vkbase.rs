@@ -219,7 +219,8 @@ impl VkBase {
             let device_extension_names_raw = [khr::swapchain::NAME.as_ptr()];
             let features = vk::PhysicalDeviceFeatures::default()
                 .shader_clip_distance(true)
-                .sampler_anisotropy(true);
+                .sampler_anisotropy(true)
+                .wide_lines(true);
             let mut vk13_features = vk::PhysicalDeviceVulkan13Features::default()
                 .synchronization2(true)
                 .dynamic_rendering(true);

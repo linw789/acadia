@@ -422,6 +422,7 @@ pub struct PipelineBuilder<'a> {
     depth_format: Option<vk::Format>,
     topology: vk::PrimitiveTopology,
     enable_dynamic_depth_bias: bool,
+    line_width: f32,
 }
 
 impl<'a> PipelineBuilder<'a> {
@@ -441,6 +442,7 @@ impl<'a> PipelineBuilder<'a> {
             depth_format: None,
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
             enable_dynamic_depth_bias: false,
+            line_width: 1.0,
         }
     }
 
@@ -456,6 +458,11 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn topology(mut self, topology: vk::PrimitiveTopology) -> Self {
         self.topology = topology;
+        self
+    }
+
+    pub fn line_width(mut self, w: f32) -> Self {
+        self.line_width = w;
         self
     }
 
@@ -484,10 +491,11 @@ impl<'a> PipelineBuilder<'a> {
             .viewports(&viewports)
             .scissors(&scissor);
 
+        let line_width = f32::max(1.0, self.line_width);
         let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .cull_mode(vk::CullModeFlags::BACK)
-            .line_width(1.0)
+            .line_width(line_width)
             .polygon_mode(vk::PolygonMode::FILL)
             .depth_bias_enable(self.enable_dynamic_depth_bias);
 
