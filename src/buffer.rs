@@ -43,7 +43,13 @@ impl Pointer {
     }
 
     fn copy_slice<T: 'static>(&mut self, offset: u64, slice: &[T]) {
-        assert!(self.size >= (offset + (size_of::<T>() * slice.len()) as u64));
+        assert!(
+            self.size >= (offset + (size_of::<T>() * slice.len()) as u64),
+            "buffer size: {}, offset: {}, data size: {}",
+            self.size,
+            offset,
+            size_of::<T>() * slice.len()
+        );
         unsafe {
             let dst_ptr = (self.ptr as *mut u8).add(offset as usize) as *mut T;
             copy_nonoverlapping(slice.as_ptr(), dst_ptr, slice.len());

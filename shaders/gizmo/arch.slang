@@ -7,10 +7,7 @@ ConstantBuffer<PerFrame> per_frame;
 
 struct VertexInput {
     float3 position;
-    // instance attributes
-    uint id;
     float3 color;
-    float4x4 transform;
 }
 
 struct FragmentInput {
@@ -25,10 +22,8 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput vertex_main(VertexInput input) {
     VertexOutput output;
+    output.position = mul(per_frame.pers_view_matrix, float4(input.position, 1.0));
     output.frag_input.color = input.color;
-
-    float4 world_pos = mul(input.transform, float4(input.position, 1.0));
-    output.position = mul(per_frame.pers_view_matrix, world_pos);
     return output;
 }
 
