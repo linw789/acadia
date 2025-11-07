@@ -43,7 +43,7 @@ struct GizmoArrowPass {
 }
 
 #[derive(Default)]
-struct GizmoArchPass {
+struct GizmoCirclePass {
     program: Program,
     // arch: Mesh,
     pipeline: vk::Pipeline,
@@ -61,7 +61,7 @@ struct GizmoTest {
     renderer: Option<Renderer>,
     triangle: Mesh,
     gizmo_arrow: GizmoArrowPass,
-    gizmo_arch: GizmoArchPass,
+    gizmo_arch: GizmoCirclePass,
 }
 
 impl GizmoArrowPass {
@@ -383,7 +383,7 @@ impl GizmoArrowPass {
     }
 }
 
-impl GizmoArchPass {
+impl GizmoCirclePass {
     const PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
 
     fn new(renderer: &Renderer) -> Self {
@@ -749,7 +749,7 @@ impl Scene for GizmoTest {
     fn init(&mut self, window: &Window) {
         let renderer = Renderer::new(window);
         self.gizmo_arrow = GizmoArrowPass::new(&renderer);
-        self.gizmo_arch = GizmoArchPass::new(&renderer);
+        self.gizmo_arch = GizmoCirclePass::new(&renderer);
         self.renderer = Some(renderer);
     }
 
