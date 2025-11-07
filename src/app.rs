@@ -68,7 +68,7 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
-                let scale = 0.52;
+                let scale = 0.1;
                 if event.state.is_pressed() {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowLeft)
