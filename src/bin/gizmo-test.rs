@@ -9,13 +9,13 @@ use acadia::{
     buffer::Buffer,
     camera::{Camera, CameraBuilder},
     common::Vertex,
+    gui::gizmo::transform3d::GizmoTransform3D,
     mesh::Mesh,
     offset_of,
     pipeline::PipelineBuilder,
     renderer::{MAX_FRAMES_IN_FLIGHT, Renderer},
     scene::Scene,
     shader::Program,
-    gui::gizmo::transform3d::GizmoTransform3D,
 };
 use glam::{Mat3, Mat4, Vec3, vec3};
 use std::{f32::consts::PI, rc::Rc};
@@ -1017,12 +1017,14 @@ impl Scene for GizmoTest {
         let pv_matrix = camera.ny_pers_view_matrix(image_aspect_ratio);
         let pvsm = pv_matrix * scale_matrix;
 
-        self.triangle_pass.update(renderer.in_flight_frame_index(), &pv_matrix);
+        self.triangle_pass
+            .update(renderer.in_flight_frame_index(), &pv_matrix);
         self.gizmo_arrow
             .update(renderer.in_flight_frame_index(), &pvsm);
         self.gizmo_arch
             .update(renderer.in_flight_frame_index(), &pvsm, camera.position);
-        self.gizmo_transform3d.update(renderer.in_flight_frame_index(), &pvsm, camera.position);
+        self.gizmo_transform3d
+            .update(renderer.in_flight_frame_index(), &pvsm, camera.position);
 
         renderer.begin_frame();
 

@@ -480,8 +480,8 @@ impl<'a> PipelineBuilder<'a> {
             })
             .collect();
 
-        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(self.topology);
+        let input_assembly_state =
+            vk::PipelineInputAssemblyStateCreateInfo::default().topology(self.topology);
 
         // Because we use dynamic viewport, we can pass a dummy viewport and scissor to create-info to
         // make Vulkan validation layer happy.

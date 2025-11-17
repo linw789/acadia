@@ -37,8 +37,18 @@ impl GizmoRotate {
             &renderer.vkbase.device,
             vk::PipelineBindPoint::GRAPHICS,
             vec![
-                Rc::clone(renderer.shader_set.get("gizmo/transform3d-rotate.vert").unwrap()),
-                Rc::clone(renderer.shader_set.get("gizmo/transform3d-rotate.frag").unwrap()),
+                Rc::clone(
+                    renderer
+                        .shader_set
+                        .get("gizmo/transform3d-rotate.vert")
+                        .unwrap(),
+                ),
+                Rc::clone(
+                    renderer
+                        .shader_set
+                        .get("gizmo/transform3d-rotate.frag")
+                        .unwrap(),
+                ),
             ],
         );
 
@@ -266,7 +276,12 @@ impl GizmoRotate {
         );
     }
 
-    pub fn update(&mut self, in_flight_frame_index: usize, pers_view_matrix: &Mat4, camera_pos: Vec3) {
+    pub fn update(
+        &mut self,
+        in_flight_frame_index: usize,
+        pers_view_matrix: &Mat4,
+        camera_pos: Vec3,
+    ) {
         let per_frame_uniform_data_offset =
             in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE;
         self.uniform_buf

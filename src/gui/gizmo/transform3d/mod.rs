@@ -1,11 +1,11 @@
 mod rotate;
 mod translate;
 
-use translate::GizmoTranslate;
-use rotate::GizmoRotate;
 use crate::renderer::Renderer;
-use ::glam::{Mat4, Vec3};
 use ::ash::Device;
+use ::glam::{Mat4, Vec3};
+use rotate::GizmoRotate;
+use translate::GizmoTranslate;
 
 #[derive(Default)]
 pub struct GizmoTransform3D {
@@ -27,8 +27,10 @@ impl GizmoTransform3D {
         pers_view_matrix: &Mat4,
         camera_pos: Vec3,
     ) {
-        self.translate.update(in_flight_frame_index, pers_view_matrix);
-        self.rotate.update(in_flight_frame_index, pers_view_matrix, camera_pos);
+        self.translate
+            .update(in_flight_frame_index, pers_view_matrix);
+        self.rotate
+            .update(in_flight_frame_index, pers_view_matrix, camera_pos);
     }
 
     pub fn draw(&self, renderer: &Renderer) {
