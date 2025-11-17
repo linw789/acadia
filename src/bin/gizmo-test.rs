@@ -15,6 +15,7 @@ use acadia::{
     renderer::{MAX_FRAMES_IN_FLIGHT, Renderer},
     scene::Scene,
     shader::Program,
+    gui::gizmo::transform3d::GizmoTransform3D,
 };
 use glam::{Mat3, Mat4, Vec3, vec3};
 use std::{f32::consts::PI, rc::Rc};
@@ -23,6 +24,12 @@ use std::{f32::consts::PI, rc::Rc};
 struct GizmoInstance {
     id: u32,
     color: Vec3,
+    transform: Mat4,
+}
+
+#[repr(C, packed)]
+struct GizmoArrowPickingInstance {
+    id: u32,
     transform: Mat4,
 }
 
@@ -71,6 +78,8 @@ struct GizmoTest {
     triangle_pass: TrianglePass,
     gizmo_arrow: GizmoArrowPass,
     gizmo_arch: GizmoCirclePass,
+
+    gizmo_transform3d: GizmoTransform3D,
 }
 
 impl GizmoArrowPass {
@@ -517,6 +526,7 @@ impl GizmoCirclePass {
         }
     }
 
+    // https://siegelord.net/circle_draw
     fn gen_circles(&mut self, object_pos: Vec3, camera_pos: Vec3) {
         // Generate a circle of points around `axis_id` centered at (0, 0, 0).
         fn gen_points(
@@ -990,6 +1000,7 @@ impl Scene for GizmoTest {
         let renderer = Renderer::new(window);
         self.gizmo_arrow = GizmoArrowPass::new(&renderer);
         self.gizmo_arch = GizmoCirclePass::new(&renderer);
+        self.gizmo_transform3d = GizmoTransform3D::new(&renderer);
         self.triangle_pass = TrianglePass::new(&renderer);
         self.renderer = Some(renderer);
     }
@@ -1011,12 +1022,14 @@ impl Scene for GizmoTest {
             .update(renderer.in_flight_frame_index(), &pvsm);
         self.gizmo_arch
             .update(renderer.in_flight_frame_index(), &pvsm, camera.position);
+        self.gizmo_transform3d.update(renderer.in_flight_frame_index(), &pvsm, camera.position);
 
         renderer.begin_frame();
 
         self.triangle_pass.draw(&renderer);
-        self.gizmo_arrow.draw(renderer);
-        self.gizmo_arch.draw(renderer);
+        // self.gizmo_arrow.draw(renderer);
+        // self.gizmo_arch.draw(renderer);
+        self.gizmo_transform3d.draw(renderer);
 
         renderer.end_frame();
     }
@@ -1041,6 +1054,7 @@ impl Scene for GizmoTest {
             self.triangle_pass.destruct(device);
             self.gizmo_arch.destruct(device);
             self.gizmo_arrow.destruct(device);
+            self.gizmo_transform3d.destruct(device);
         }
 
         self.renderer.as_mut().unwrap().destruct();

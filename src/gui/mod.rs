@@ -1,4 +1,5 @@
 pub mod font;
+pub mod gizmo;
 
 use crate::{buffer::Buffer, common::Vertex2D, texture::Texture};
 use ash::{Device, vk};
