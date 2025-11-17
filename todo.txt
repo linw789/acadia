@@ -1,10 +1,16 @@
 [ ] 3D transform gizmo
     [x] Draw translation arrows
     [x] Draw rotation circles
-    [ ] Hide the part of the circles that are behind the global.
-    [ ] Draw scale hammers.
-    [ ] Fade translation/scale gizmos if they become parallel to view direction.
+    [x] Draw dashed line for the arch that's behind the global.
     [ ] Implement pixel-accurate picking of gizmos.
-    [ ] Update object's translation/scale based on the selected gizmo by mouse movement.
+    [ ] Update object's translation based on the selected gizmo by mouse movement.
     [ ] Update object's rotation.
     [ ] Draw a pie on the rotation disk based on the rotation angle.
+    [ ] Fade translation/scale gizmos if they become parallel to view direction.
+    [ ] Draw scale hammers.
+    [ ] Update object's scale scale gizmo is picked.
+[ ] Remove color attribute from rotation gizmo vertex, and replace it with push constant.
+[ ] Add reflection for push constants in shaders.
+[ ] Add dirty flag in Camera, and update the matrix in get_pers_view_matrix() on demand. And pass
+    &Camera where pers_view_matrix is passed
+[x] Fix camera movement. It's too jumpy.
