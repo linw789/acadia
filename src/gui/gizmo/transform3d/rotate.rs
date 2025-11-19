@@ -92,7 +92,6 @@ impl GizmoRotate {
                 &[renderer.vkbase.surface_format.format],
                 &color_blend_state,
             )
-            .depth_format(renderer.vkbase.depth_format)
             .topology(vk::PrimitiveTopology::LINE_LIST)
             .line_width(3.0)
             .build()
@@ -308,11 +307,6 @@ impl GizmoRotate {
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::DONT_CARE)
             .store_op(vk::AttachmentStoreOp::STORE)];
-        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
-            .image_view(renderer.depth_image_view())
-            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .store_op(vk::AttachmentStoreOp::STORE);
 
         let image_extent = renderer.vkbase.swapchain.image_extent();
 
@@ -322,8 +316,7 @@ impl GizmoRotate {
                 extent: image_extent,
             })
             .layer_count(1)
-            .color_attachments(&color_attachment_infos)
-            .depth_attachment(&depth_attachment_info);
+            .color_attachments(&color_attachment_infos);
 
         let viewport = vk::Viewport {
             x: 0.0,
