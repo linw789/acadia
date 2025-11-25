@@ -1,5 +1,5 @@
 use crate::{
-    image::ImagePool,
+    image::{ImagePool, ImageCreateParam},
     shader::{Shader, load_shaders},
     vkbase::VkBase,
 };
@@ -28,6 +28,8 @@ pub struct Renderer {
     frame_count: u64,
     in_flight_frame_index: usize,
     present_image_index: usize,
+
+    obj_id_image_index: u32,
 }
 
 impl Renderer {
@@ -111,6 +113,20 @@ impl Renderer {
         let depth_image_index =
             image_pool.new_depth_image(vkbase.swapchain.image_extent(), depth_format);
 
+        let obj_id_image_index = image_pool.new_image(
+            ImageCreateParam {
+                extent: vkbase.swapchain.image_extent().into(),
+                format: vk::Format::R32_UINT,
+                components: vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::IDENTITY,
+                    g: vk::ComponentSwizzle::IDENTITY,
+                    b: vk::ComponentSwizzle::IDENTITY,
+                    a: vk::ComponentSwizzle::IDENTITY,
+                },
+                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            }
+        );
+
         Self {
             vkbase,
             frame_fences,
@@ -129,6 +145,8 @@ impl Renderer {
             frame_count: 0,
             in_flight_frame_index: 0,
             present_image_index: 0,
+
+            obj_id_image_index,
         }
     }
 
@@ -138,6 +156,10 @@ impl Renderer {
 
     pub fn present_image_view(&self) -> vk::ImageView {
         self.vkbase.present_image_views[self.present_image_index]
+    }
+
+    pub fn obj_id_image_view(&self) -> vk::ImageView {
+        self.image_pool.get_at_index(self.obj_id_image_index).view
     }
 
     pub fn curr_cmd_cuf(&self) -> vk::CommandBuffer {

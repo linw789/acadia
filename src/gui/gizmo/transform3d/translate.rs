@@ -125,12 +125,17 @@ impl GizmoTranslate {
                 .vertex_binding_descriptions(&vertex_binding_descs)
                 .vertex_attribute_descriptions(&vertex_attrib_descs);
 
-            let color_attachment_state = [vk::PipelineColorBlendAttachmentState::default()
-                .blend_enable(false)
-                .color_write_mask(vk::ColorComponentFlags::RGBA)];
+            let blend_attachment_state = [
+                vk::PipelineColorBlendAttachmentState::default()
+                    .blend_enable(false)
+                    .color_write_mask(vk::ColorComponentFlags::RGBA),
+                vk::PipelineColorBlendAttachmentState::default()
+                    .blend_enable(false)
+                    .color_write_mask(vk::ColorComponentFlags::RGBA),
+            ];
 
             let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-                .attachments(&color_attachment_state);
+                .attachments(&blend_attachment_state);
 
             let obj_id_render_target_format = vk::Format::R32_UINT;
 
@@ -140,7 +145,7 @@ impl GizmoTranslate {
                 &vertex_input_state,
                 &[
                     renderer.vkbase.surface_format.format,
-                    // obj_id_render_target_format,
+                    obj_id_render_target_format,
                 ],
                 &color_blend_state,
             )
@@ -243,16 +248,18 @@ impl GizmoTranslate {
     }
 
     pub fn draw(&self, renderer: &Renderer) {
-        let color_attachment_infos = [vk::RenderingAttachmentInfo::default()
-            .image_view(renderer.present_image_view())
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
-                },
-            })];
+        let color_attachment_infos = [
+            vk::RenderingAttachmentInfo::default()
+                .image_view(renderer.present_image_view())
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE),
+            vk::RenderingAttachmentInfo::default()
+                .image_view(renderer.obj_id_image_view())
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE),
+        ];
         let depth_attachment_info = vk::RenderingAttachmentInfo::default()
             .image_view(renderer.depth_image_view())
             .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)

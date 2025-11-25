@@ -154,16 +154,18 @@ impl TrianglePass {
     }
 
     fn draw(&self, renderer: &Renderer) {
-        let color_attachment_infos = [vk::RenderingAttachmentInfo::default()
-            .image_view(renderer.present_image_view())
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
-                },
-            })];
+        let color_attachment_infos = [
+            vk::RenderingAttachmentInfo::default()
+                .image_view(renderer.present_image_view())
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
+                    },
+                }),
+        ];
         let depth_attachment_info = vk::RenderingAttachmentInfo::default()
             .image_view(renderer.depth_image_view())
             .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)

@@ -14,6 +14,7 @@ struct VertexInput {
 }
 
 struct FragmentInput {
+    uint id;
     float3 color;
 }
 
@@ -25,6 +26,7 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput vertex_main(VertexInput input) {
     VertexOutput output;
+    output.frag_input.id = input.id;
     output.frag_input.color = input.color;
 
     float4 world_pos = mul(input.transform, float4(input.position, 1.0));
@@ -34,11 +36,13 @@ VertexOutput vertex_main(VertexInput input) {
 
 struct Fragment {
     float4 color;
+    uint id;
 }
 
 [shader("fragment")]
 Fragment fragment_main(FragmentInput frag_input: FragmentInput) {
     Fragment fragment;
     fragment.color = float4(frag_input.color, 1.0);
+    fragment.id = frag_input.id;
     return fragment;
 }

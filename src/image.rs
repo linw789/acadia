@@ -17,6 +17,13 @@ pub struct Image {
     pub memory: vk::DeviceMemory,
 }
 
+pub struct ImageCreateParam {
+    pub extent: vk::Extent3D,
+    pub format: vk::Format,
+    pub components: vk::ComponentMapping,
+    pub usage: vk::ImageUsageFlags,
+}
+
 impl ImagePool {
     pub fn new(
         device: Arc<Device>,
@@ -96,16 +103,12 @@ impl ImagePool {
 
     pub fn new_image(
         &mut self,
-        extent: vk::Extent3D,
-        format: vk::Format,
-        view_components: vk::ComponentMapping,
+        createparam: ImageCreateParam,
     ) -> u32 {
         self.add_image(Image::new(
             &self.device,
             &self.device_memory_properties,
-            extent,
-            format,
-            view_components,
+            createparam,
         ))
     }
 
@@ -131,12 +134,16 @@ impl ImagePool {
         let mut images: Vec<_> = byte_slices
             .iter()
             .map(|(_bytes, ext)| {
+                let createparam = ImageCreateParam {
+                    extent: *ext,
+                    format,
+                    components: view_components,
+                    ..Default::default()
+                };
                 Image::new(
                     &self.device,
                     &self.device_memory_properties,
-                    *ext,
-                    format,
-                    view_components,
+                    createparam,
                 )
             })
             .collect();
@@ -356,19 +363,17 @@ impl Image {
     fn new(
         device: &Device,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        extent: vk::Extent3D,
-        format: vk::Format,
-        view_components: vk::ComponentMapping,
+        createparam: ImageCreateParam,
     ) -> Self {
         let image_createinfo = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
-            .format(format)
-            .extent(extent)
+            .format(createparam.format)
+            .extent(createparam.extent)
             .mip_levels(1)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
+            .usage(createparam.usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
         let image = unsafe { device.create_image(&image_createinfo, None).unwrap() };
 
@@ -395,8 +400,8 @@ impl Image {
         let view_createinfo = vk::ImageViewCreateInfo::default()
             .image(image)
             .view_type(vk::ImageViewType::TYPE_2D)
-            .format(format)
-            .components(view_components)
+            .format(createparam.format)
+            .components(createparam.components)
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
@@ -408,7 +413,7 @@ impl Image {
         let view = unsafe { device.create_image_view(&view_createinfo, None).unwrap() };
 
         Self {
-            extent,
+            extent: createparam.extent,
             image,
             view,
             memory,
@@ -426,6 +431,22 @@ impl Image {
         self.image = vk::Image::null();
         self.view = vk::ImageView::null();
         self.memory = vk::DeviceMemory::null();
+    }
+}
+
+impl Default for ImageCreateParam {
+    fn default() -> Self {
+        Self {
+            extent: vk::Extent3D { width: 0, height: 0, depth: 0 },
+            format: vk::Format::R32G32B32A32_SFLOAT,
+            components: vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+            },
+            usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+        }
     }
 }
 
