@@ -103,7 +103,7 @@ impl ImagePool {
 
     pub fn new_image(
         &mut self,
-        createparam: ImageCreateParam,
+        createparam: &ImageCreateParam,
     ) -> u32 {
         self.add_image(Image::new(
             &self.device,
@@ -143,7 +143,7 @@ impl ImagePool {
                 Image::new(
                     &self.device,
                     &self.device_memory_properties,
-                    createparam,
+                    &createparam,
                 )
             })
             .collect();
@@ -363,7 +363,7 @@ impl Image {
     fn new(
         device: &Device,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        createparam: ImageCreateParam,
+        createparam: &ImageCreateParam,
     ) -> Self {
         let image_createinfo = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
@@ -377,17 +377,17 @@ impl Image {
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
         let image = unsafe { device.create_image(&image_createinfo, None).unwrap() };
 
-        let depth_image_memory_req = unsafe { device.get_image_memory_requirements(image) };
-        let depth_image_memory_index = find_memorytype_index(
-            &depth_image_memory_req,
+        let image_memory_req = unsafe { device.get_image_memory_requirements(image) };
+        let image_memory_index = find_memorytype_index(
+            &image_memory_req,
             memory_properties,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )
         .expect("Unable to find suitable memory index for depth image.");
 
         let image_allocate_info = vk::MemoryAllocateInfo::default()
-            .allocation_size(depth_image_memory_req.size)
-            .memory_type_index(depth_image_memory_index);
+            .allocation_size(image_memory_req.size)
+            .memory_type_index(image_memory_index);
 
         let memory = unsafe { device.allocate_memory(&image_allocate_info, None).unwrap() };
 

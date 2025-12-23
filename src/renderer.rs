@@ -1,5 +1,6 @@
 use crate::{
-    image::{ImagePool, ImageCreateParam},
+    buffer::Buffer,
+    image::{ImageCreateParam, ImagePool},
     shader::{Shader, load_shaders},
     vkbase::VkBase,
 };
@@ -29,7 +30,8 @@ pub struct Renderer {
     in_flight_frame_index: usize,
     present_image_index: usize,
 
-    obj_id_image_index: u32,
+    obj_id_image_indices: [u32; 2],
+    obj_id_buffers: [Buffer; 2],
 }
 
 impl Renderer {
@@ -113,9 +115,10 @@ impl Renderer {
         let depth_image_index =
             image_pool.new_depth_image(vkbase.swapchain.image_extent(), depth_format);
 
-        let obj_id_image_index = image_pool.new_image(
-            ImageCreateParam {
-                extent: vkbase.swapchain.image_extent().into(),
+        let obj_id_image_ext = vkbase.swapchain.image_extent();
+        let obj_id_image_indices = {
+            let createparam = ImageCreateParam {
+                extent: obj_id_image_ext.into(),
                 format: vk::Format::R32_UINT,
                 components: vk::ComponentMapping {
                     r: vk::ComponentSwizzle::IDENTITY,
@@ -123,9 +126,31 @@ impl Renderer {
                     b: vk::ComponentSwizzle::IDENTITY,
                     a: vk::ComponentSwizzle::IDENTITY,
                 },
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            }
-        );
+                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+            };
+            let obj_id_image_index_0 = image_pool.new_image(&createparam);
+            let obj_id_image_index_1 = image_pool.new_image(&createparam);
+            [obj_id_image_index_0, obj_id_image_index_1]
+        };
+
+        let obj_id_buffers = {
+            let image_size = (obj_id_image_ext.width * obj_id_image_ext.height) as u64;
+            let buf_size = image_size * (size_of::<u32>() as u64) * 2;
+            [
+                Buffer::new(
+                    &vkbase.device,
+                    buf_size,
+                    vk::BufferUsageFlags::TRANSFER_DST,
+                    &vkbase.device_memory_properties,
+                ),
+                Buffer::new(
+                    &vkbase.device,
+                    buf_size,
+                    vk::BufferUsageFlags::TRANSFER_DST,
+                    &vkbase.device_memory_properties,
+                ),
+            ]
+        };
 
         Self {
             vkbase,
@@ -146,7 +171,8 @@ impl Renderer {
             in_flight_frame_index: 0,
             present_image_index: 0,
 
-            obj_id_image_index,
+            obj_id_image_indices,
+            obj_id_buffers,
         }
     }
 
@@ -159,7 +185,13 @@ impl Renderer {
     }
 
     pub fn obj_id_image_view(&self) -> vk::ImageView {
-        self.image_pool.get_at_index(self.obj_id_image_index).view
+        let image_index =
+            self.obj_id_image_indices[self.in_flight_frame_index];
+        self.image_pool.get_at_index(image_index).view
+    }
+
+    pub fn obj_id_buffer(&self) -> &Buffer {
+        &self.obj_id_buffers[self.in_flight_frame_index]
     }
 
     pub fn curr_cmd_cuf(&self) -> vk::CommandBuffer {
@@ -168,6 +200,87 @@ impl Renderer {
 
     pub fn in_flight_frame_index(&self) -> usize {
         self.in_flight_frame_index
+    }
+
+    pub fn copy_obj_ids_from_image_to_buffer(&self) {
+        let obj_id_image_index =
+            self.obj_id_image_indices[self.in_flight_frame_index];
+        let obj_id_image = self.image_pool.get_at_index(obj_id_image_index);
+
+        let pre_transfer_layout_barrier = [vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
+            .dst_access_mask(vk::AccessFlags2::TRANSFER_READ)
+            .old_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
+            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(obj_id_image.image)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            })];
+        let pre_transfer_dependency =
+            vk::DependencyInfo::default().image_memory_barriers(&pre_transfer_layout_barrier);
+
+        unsafe {
+            self.vkbase
+                .device
+                .cmd_pipeline_barrier2(self.curr_cmd_cuf(), &pre_transfer_dependency);
+        }
+
+        let copy_region = [vk::BufferImageCopy::default()
+            .buffer_offset(0)
+            .buffer_row_length(0)
+            .buffer_image_height(0)
+            .image_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
+            .image_extent(obj_id_image.extent)];
+
+        let dst_buf = &self.obj_id_buffers[self.in_flight_frame_index];
+        unsafe {
+            self.vkbase.device.cmd_copy_image_to_buffer(
+                self.curr_cmd_cuf(),
+                obj_id_image.image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dst_buf.buf,
+                &copy_region,
+            );
+        }
+
+        // let post_transfer_layout_barrier = [vk::ImageMemoryBarrier2::default()
+        //     .src_stage_mask(vk::PipelineStageFlags2::TRANSFER)
+        //     .src_access_mask(vk::AccessFlags2::TRANSFER_READ)
+        //     .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+        //     .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+        //     .old_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+        //     .new_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
+        //     .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        //     .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        //     .image(obj_id_image.image)
+        //     .subresource_range(vk::ImageSubresourceRange {
+        //         aspect_mask: vk::ImageAspectFlags::COLOR,
+        //         base_mip_level: 0,
+        //         level_count: 1,
+        //         base_array_layer: 0,
+        //         layer_count: 1,
+        //     })];
+        // let post_transfer_dependency =
+        //     vk::DependencyInfo::default().image_memory_barriers(&post_transfer_layout_barrier);
+        // unsafe {
+        //     self.vkbase
+        //         .device
+        //         .cmd_pipeline_barrier2(self.curr_cmd_cuf(), &post_transfer_dependency);
+        // }
     }
 
     pub fn begin_frame(&mut self) {
@@ -220,6 +333,42 @@ impl Renderer {
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .image(present_image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let dependency_info =
+                vk::DependencyInfo::default().image_memory_barriers(std::slice::from_ref(&barrier));
+            self.vkbase
+                .device
+                .cmd_pipeline_barrier2(cmd_buf, &dependency_info);
+        }
+
+        // Transition the object-id image's layout.
+        unsafe {
+            let image_index =
+                self.obj_id_image_indices[self.in_flight_frame_index];
+            let obj_id_image = self.image_pool.get_at_index(image_index);
+
+            let old_layout = if self.frame_count < (MAX_FRAMES_IN_FLIGHT as u64) {
+                vk::ImageLayout::UNDEFINED
+            } else {
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL
+            };
+
+            let barrier = vk::ImageMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+                .src_access_mask(vk::AccessFlags2::NONE)
+                .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+                .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+                .old_layout(old_layout)
+                .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(obj_id_image.image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
@@ -331,7 +480,7 @@ impl Renderer {
 
         // Because we need to use `in_flight_frame_index` before `begin_frame()` is called, we
         // update it post frame_count increment. The first usage of `in_flight_frame_index`
-        // will be the initial value 0, which is fine.
+        // will be its initial value 0, which is correct.
         self.in_flight_frame_index = (self.frame_count % (MAX_FRAMES_IN_FLIGHT as u64)) as usize;
     }
 
@@ -350,7 +499,6 @@ impl Renderer {
             for (_name, shader) in self.shader_set.iter_mut() {
                 Rc::get_mut(shader).unwrap().destruct(&self.vkbase.device);
             }
-
             for sema in self.present_acquired_semaphores.iter() {
                 self.vkbase.device.destroy_semaphore(*sema, None);
             }
@@ -359,6 +507,9 @@ impl Renderer {
             }
             for fence in &self.frame_fences {
                 self.vkbase.device.destroy_fence(*fence, None);
+            }
+            for buf in self.obj_id_buffers.iter_mut() {
+                buf.destruct(&self.vkbase.device);
             }
 
             self.vkbase

@@ -299,6 +299,8 @@ impl Scene for GizmoTest {
         self.triangle_pass.draw(&renderer);
         self.gizmo_transform3d.draw(renderer);
 
+        renderer.copy_obj_ids_from_image_to_buffer();
+
         renderer.end_frame();
     }
 
