@@ -17,7 +17,7 @@ use acadia::{
     scene::Scene,
     shader::Program,
 };
-use glam::{Mat4, vec3};
+use glam::{Mat4, Vec2, vec3};
 use std::rc::Rc;
 
 #[derive(Default)]
@@ -277,7 +277,7 @@ impl Scene for GizmoTest {
         self.renderer = Some(renderer);
     }
 
-    fn update(&mut self, camera: &Camera) {
+    fn update(&mut self, camera: &Camera, cursor_pos: Vec2) {
         let renderer = self.renderer.as_mut().unwrap();
 
         let distance_to_camera = camera.position.length();
@@ -302,6 +302,11 @@ impl Scene for GizmoTest {
         renderer.copy_obj_ids_from_image_to_buffer();
 
         renderer.end_frame();
+
+        let obj_id_index = ((cursor_pos.y as u32) * image_extent.width) + (cursor_pos.x as u32);
+        let obj_id_buf = renderer.obj_id_buffer();
+        let obj_id = obj_id_buf.get::<u32>(obj_id_index as usize);
+        println!("[DEBUG LINW] cursor pos: ({}, {}), object id: {}", cursor_pos.x, cursor_pos.y, obj_id);
     }
 
     fn resize(&mut self, size: PhysicalSize<u32>) {

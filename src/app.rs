@@ -1,13 +1,13 @@
 use crate::{camera::Camera, scene::Scene};
 use ::winit::{
     application::ApplicationHandler,
-    dpi::PhysicalSize,
+    dpi::{PhysicalPosition, PhysicalSize},
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
     event_loop::ActiveEventLoop,
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
-use glam::vec3;
+use glam::{Vec2, vec2, vec3};
 use std::f32::consts::PI;
 
 pub struct App {
@@ -19,6 +19,7 @@ pub struct App {
 
     exit_requested: bool,
     is_right_button_pressed: bool,
+    cursor_pos: Vec2,
 }
 
 impl App {
@@ -30,6 +31,7 @@ impl App {
             camera,
             exit_requested: false,
             is_right_button_pressed: false,
+            cursor_pos: Vec2::ZERO,
         }
     }
 
@@ -38,7 +40,7 @@ impl App {
     }
 
     fn update(&mut self) {
-        self.scene.update(&self.camera);
+        self.scene.update(&self.camera, self.cursor_pos);
     }
 
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
@@ -97,6 +99,9 @@ impl ApplicationHandler for App {
                         ElementState::Released => self.is_right_button_pressed = false,
                     }
                 }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_pos = vec2(position.x as f32, position.y as f32);
             }
             WindowEvent::CloseRequested => {
                 println!("[DEBUG LINW] close requested.");

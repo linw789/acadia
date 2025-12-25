@@ -256,31 +256,6 @@ impl Renderer {
                 &copy_region,
             );
         }
-
-        // let post_transfer_layout_barrier = [vk::ImageMemoryBarrier2::default()
-        //     .src_stage_mask(vk::PipelineStageFlags2::TRANSFER)
-        //     .src_access_mask(vk::AccessFlags2::TRANSFER_READ)
-        //     .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-        //     .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
-        //     .old_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-        //     .new_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
-        //     .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        //     .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        //     .image(obj_id_image.image)
-        //     .subresource_range(vk::ImageSubresourceRange {
-        //         aspect_mask: vk::ImageAspectFlags::COLOR,
-        //         base_mip_level: 0,
-        //         level_count: 1,
-        //         base_array_layer: 0,
-        //         layer_count: 1,
-        //     })];
-        // let post_transfer_dependency =
-        //     vk::DependencyInfo::default().image_memory_barriers(&post_transfer_layout_barrier);
-        // unsafe {
-        //     self.vkbase
-        //         .device
-        //         .cmd_pipeline_barrier2(self.curr_cmd_cuf(), &post_transfer_dependency);
-        // }
     }
 
     pub fn begin_frame(&mut self) {

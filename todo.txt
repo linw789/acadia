@@ -3,6 +3,9 @@
     [x] Draw rotation circles
     [x] Draw dashed line for the arch that's behind the global.
     [ ] Implement pixel-accurate picking of gizmos.
+        [x] Read object ids under the mouse cursor. 
+        [x] Read the object ids from the second render target buffer from CPU.
+        [x] Add a second render target to store object ids.
     [ ] Update object's translation based on the selected gizmo by mouse movement.
     [ ] Update object's rotation.
     [ ] Draw a pie on the rotation disk based on the rotation angle.

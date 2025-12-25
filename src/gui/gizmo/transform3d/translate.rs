@@ -221,15 +221,15 @@ impl GizmoTranslate {
         let translation = Mat4::from_translation(position);
         let scale = Mat4::from_scale(vec3(scale, scale, scale));
 
-        let x_arrow_id = 0;
+        let x_arrow_id = 1;
         let x_arrow_color = vec3(1.0, 0.0, 0.0);
         let x_arrow_transform = translation * Mat4::from_rotation_z(-0.5 * PI) * scale;
 
-        let y_arrow_id = 1;
+        let y_arrow_id = 2;
         let y_arrow_color = vec3(0.0, 1.0, 0.0);
         let y_arrow_transform = translation * scale;
 
-        let z_arrow_id = 2;
+        let z_arrow_id = 3;
         let z_arrow_color = vec3(0.0, 0.0, 1.0);
         let z_arrow_transform = translation * Mat4::from_rotation_x(0.5 * PI) * scale;
 
@@ -257,7 +257,7 @@ impl GizmoTranslate {
             vk::RenderingAttachmentInfo::default()
                 .image_view(renderer.obj_id_image_view())
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE),
         ];
         let depth_attachment_info = vk::RenderingAttachmentInfo::default()
