@@ -10,6 +10,7 @@ use acadia::{
     camera::{Camera, CameraBuilder},
     common::Vertex,
     gui::gizmo::transform3d::GizmoTransform3D,
+    input::MouseState,
     mesh::Mesh,
     offset_of,
     pipeline::PipelineBuilder,
@@ -17,11 +18,11 @@ use acadia::{
     scene::Scene,
     shader::Program,
 };
-use glam::{Mat4, Vec2, vec3};
+use glam::{Mat4, Vec3, vec3};
 use std::rc::Rc;
 
 #[derive(Default)]
-struct TrianglePass {
+struct CubePass {
     program: Program,
     mesh: Mesh,
     pipeline: vk::Pipeline,
@@ -32,11 +33,13 @@ struct TrianglePass {
 #[derive(Default)]
 struct GizmoTest {
     renderer: Option<Renderer>,
-    triangle_pass: TrianglePass,
+    cube_pass: CubePass,
     gizmo_transform3d: GizmoTransform3D,
+    is_right_button_pressed: bool,
+    gizmo_translate_picked: Option<Vec3>,
 }
 
-impl TrianglePass {
+impl CubePass {
     const PER_FRAME_UNIFORM_DATA_SIZE: usize = 64;
 
     fn new(renderer: &Renderer) -> Self {
@@ -44,14 +47,15 @@ impl TrianglePass {
             &renderer.vkbase.device,
             vk::PipelineBindPoint::GRAPHICS,
             vec![
-                Rc::clone(renderer.shader_set.get("triangle.vert").unwrap()),
-                Rc::clone(renderer.shader_set.get("triangle.frag").unwrap()),
+                Rc::clone(renderer.shader_set.get("cube.vert").unwrap()),
+                Rc::clone(renderer.shader_set.get("cube.frag").unwrap()),
             ],
+            size_of::<Mat4>(),
         );
         let mesh = Mesh::from_obj(
             &renderer.vkbase.device,
             &renderer.vkbase.device_memory_properties,
-            "assets/meshes/triangle.obj",
+            "assets/meshes/cube.obj",
         );
 
         let pipeline = {
@@ -153,19 +157,17 @@ impl TrianglePass {
             .copy_value(per_frame_uniform_data_offset, pers_view_matrix);
     }
 
-    fn draw(&self, renderer: &Renderer) {
-        let color_attachment_infos = [
-            vk::RenderingAttachmentInfo::default()
-                .image_view(renderer.present_image_view())
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
-                    },
-                }),
-        ];
+    fn draw(&self, renderer: &Renderer, transform: &Mat4) {
+        let color_attachment_infos = [vk::RenderingAttachmentInfo::default()
+            .image_view(renderer.present_image_view())
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [135.0 / 255.0, 206.0 / 255.0, 250.0 / 255.0, 15.0 / 255.0],
+                },
+            })];
         let depth_attachment_info = vk::RenderingAttachmentInfo::default()
             .image_view(renderer.depth_image_view())
             .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
@@ -244,6 +246,18 @@ impl TrianglePass {
                 &[(renderer.in_flight_frame_index() * Self::PER_FRAME_UNIFORM_DATA_SIZE) as u32],
             );
 
+            assert!(size_of::<Mat4>() == (self.program.push_constant_size as usize));
+            renderer.vkbase.device.cmd_push_constants(
+                cmd_buf,
+                self.program.pipeline_layout,
+                self.program.push_constant_stages,
+                0,
+                std::slice::from_raw_parts(
+                    (transform as *const Mat4) as *const u8,
+                    std::mem::size_of::<Mat4>(),
+                ),
+            );
+
             for submesh in &self.mesh.submeshes {
                 renderer.vkbase.device.cmd_draw_indexed(
                     cmd_buf,
@@ -273,11 +287,11 @@ impl Scene for GizmoTest {
     fn init(&mut self, window: &Window) {
         let renderer = Renderer::new(window);
         self.gizmo_transform3d = GizmoTransform3D::new(&renderer);
-        self.triangle_pass = TrianglePass::new(&renderer);
+        self.cube_pass = CubePass::new(&renderer);
         self.renderer = Some(renderer);
     }
 
-    fn update(&mut self, camera: &Camera, cursor_pos: Vec2) {
+    fn update(&mut self, camera: &Camera, mouse_state: &MouseState) {
         let renderer = self.renderer.as_mut().unwrap();
 
         let distance_to_camera = camera.position.length();
@@ -288,25 +302,35 @@ impl Scene for GizmoTest {
         let image_aspect_ratio = (image_extent.width as f32) / (image_extent.height as f32);
         let pv_matrix = camera.ny_pers_view_matrix(image_aspect_ratio);
         let pvsm = pv_matrix * scale_matrix;
-
-        self.triangle_pass
+        
+        let cube_transform = Mat4::from_translation(vec3(1.0, 0.0, 0.0));
+        self.cube_pass
             .update(renderer.in_flight_frame_index(), &pv_matrix);
         self.gizmo_transform3d
             .update(renderer.in_flight_frame_index(), &pvsm, camera.position);
 
         renderer.begin_frame();
 
-        self.triangle_pass.draw(&renderer);
+        self.cube_pass.draw(&renderer, &cube_transform);
         self.gizmo_transform3d.draw(renderer);
 
         renderer.copy_obj_ids_from_image_to_buffer();
 
         renderer.end_frame();
 
-        let obj_id_index = ((cursor_pos.y as u32) * image_extent.width) + (cursor_pos.x as u32);
-        let obj_id_buf = renderer.obj_id_buffer();
-        let obj_id = obj_id_buf.get::<u32>(obj_id_index as usize);
-        println!("[DEBUG LINW] cursor pos: ({}, {}), object id: {}", cursor_pos.x, cursor_pos.y, obj_id);
+        if self.is_right_button_pressed == false && mouse_state.right_button_pressed == true {
+            let obj_id_index = ((mouse_state.cursor_position.y as u32) * image_extent.width)
+                + (mouse_state.cursor_position.x as u32);
+            let obj_id_buf = renderer.obj_id_buffer();
+            let obj_id = obj_id_buf.get::<u32>(obj_id_index as usize);
+
+            self.is_right_button_pressed = true;
+            self.gizmo_translate_picked = self.gizmo_transform3d.picked(obj_id);
+        } else if self.is_right_button_pressed == true && mouse_state.right_button_pressed == false
+        {
+            self.is_right_button_pressed = false;
+            self.gizmo_translate_picked = None;
+        }
     }
 
     fn resize(&mut self, size: PhysicalSize<u32>) {
@@ -326,7 +350,7 @@ impl Scene for GizmoTest {
 
         {
             let device = &self.renderer.as_ref().unwrap().vkbase.device;
-            self.triangle_pass.destruct(device);
+            self.cube_pass.destruct(device);
             self.gizmo_transform3d.destruct(device);
         }
 

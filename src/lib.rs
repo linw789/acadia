@@ -14,3 +14,4 @@ pub mod swapchain;
 pub mod texture;
 pub mod util;
 pub mod vkbase;
+pub mod input;

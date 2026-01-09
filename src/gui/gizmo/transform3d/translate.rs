@@ -50,6 +50,7 @@ impl GizmoTranslate {
                         .unwrap(),
                 ),
             ],
+            0,
         );
 
         let arrow = Mesh::from_obj(
@@ -356,6 +357,15 @@ impl GizmoTranslate {
             }
 
             renderer.vkbase.device.cmd_end_rendering(cmd_buf);
+        }
+    }
+
+    pub fn picked(&self, id: u32) -> Option<Vec3> {
+        match id {
+            1 => Some(vec3(1.0, 0.0, 0.0)),
+            2 => Some(vec3(0.0, 1.0, 0.0)),
+            3 => Some(vec3(0.0, 0.0, 1.0)),
+            _ => None
         }
     }
 

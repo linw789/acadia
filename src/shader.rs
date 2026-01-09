@@ -11,6 +11,7 @@ use std::{
 pub struct Shader {
     pub stage: vk::ShaderStageFlags,
     pub shader_module: vk::ShaderModule,
+    pub use_push_constant: bool,
     descriptor_infos: Vec<DescriptorInfo>,
 }
 
@@ -21,6 +22,8 @@ pub struct Program {
     desc_set_layouts: [vk::DescriptorSetLayout; 4],
     desc_set_layout_count: usize,
     pub pipeline_layout: vk::PipelineLayout,
+    pub push_constant_stages: vk::ShaderStageFlags,
+    pub push_constant_size: u32,
 }
 
 struct DescriptorInfo {
@@ -84,8 +87,9 @@ impl Shader {
         };
 
         let mut shader = Self {
-            stage: vk::ShaderStageFlags::VERTEX,
+            stage: vk::ShaderStageFlags::empty(),
             descriptor_infos: Vec::new(),
+            use_push_constant: false,
             shader_module,
         };
 
@@ -239,8 +243,8 @@ impl Shader {
                             kind: desc_type,
                         });
                     }
+                    StorageClass::PushConstant => self.use_push_constant = true,
                     // StorageClass::UniformConstant => self.use_descriptor_array = true,
-                    // StorageClass::PushConstant => self.use_push_constants = true,
                     _ => (),
                 }
             }
@@ -253,18 +257,24 @@ impl Program {
         device: &Device,
         bind_point: vk::PipelineBindPoint,
         shaders: Vec<Rc<Shader>>,
+        push_constant_size: usize,
     ) -> Self {
+        let mut push_constant_stages = vk::ShaderStageFlags::empty();
         let (desc_set_layouts, desc_set_layout_count) = {
             let mut set_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] =
                 [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
             for shader in &shaders {
+                if shader.use_push_constant {
+                    push_constant_stages |= shader.stage;
+                }
+
                 for desc_info in &shader.descriptor_infos {
                     let bindings = &mut set_bindings[desc_info.set as usize];
                     let mut binding = bindings.iter_mut().find(|b| b.binding == desc_info.binding);
 
                     // Check if a SetLayoutBinding with the same set index already exists. If so,
-                    // that the current shader's stage to it, otherwise create a new
+                    // add the current shader's stage to it, otherwise create a new
                     // SetLayoutBinding.
                     match binding.as_mut() {
                         Some(b) => {
@@ -309,8 +319,16 @@ impl Program {
         };
 
         let pipeline_layout = {
-            let createinfo = vk::PipelineLayoutCreateInfo::default()
+            let mut createinfo = vk::PipelineLayoutCreateInfo::default()
                 .set_layouts(&desc_set_layouts[0..desc_set_layout_count]);
+
+            let push_constant_range = [vk::PushConstantRange::default()
+                .stage_flags(push_constant_stages)
+                .size(push_constant_size as u32)];
+            if !push_constant_stages.is_empty() {
+                createinfo = createinfo.push_constant_ranges(&push_constant_range);
+            }
+
             unsafe { device.create_pipeline_layout(&createinfo, None).unwrap() }
         };
 
@@ -320,6 +338,8 @@ impl Program {
             desc_set_layouts,
             desc_set_layout_count,
             pipeline_layout,
+            push_constant_stages,
+            push_constant_size: push_constant_size as u32,
         }
     }
 

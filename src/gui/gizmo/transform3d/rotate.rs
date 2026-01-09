@@ -50,6 +50,7 @@ impl GizmoRotate {
                         .unwrap(),
                 ),
             ],
+            0,
         );
 
         let pipeline = {

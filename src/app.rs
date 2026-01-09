@@ -1,7 +1,7 @@
-use crate::{camera::Camera, scene::Scene};
+use crate::{camera::Camera, scene::Scene, input::MouseState};
 use ::winit::{
     application::ApplicationHandler,
-    dpi::{PhysicalPosition, PhysicalSize},
+    dpi::PhysicalSize,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
     event_loop::ActiveEventLoop,
     keyboard::{KeyCode, PhysicalKey},
@@ -20,6 +20,7 @@ pub struct App {
     exit_requested: bool,
     is_right_button_pressed: bool,
     cursor_pos: Vec2,
+    cursor_delta: Vec2,
 }
 
 impl App {
@@ -32,6 +33,7 @@ impl App {
             exit_requested: false,
             is_right_button_pressed: false,
             cursor_pos: Vec2::ZERO,
+            cursor_delta: Vec2::ZERO,
         }
     }
 
@@ -40,7 +42,13 @@ impl App {
     }
 
     fn update(&mut self) {
-        self.scene.update(&self.camera, self.cursor_pos);
+        let mouse_state = MouseState {
+            right_button_pressed: self.is_right_button_pressed,
+            left_button_pressed: false,
+            cursor_position: self.cursor_pos,
+            cursor_delta: self.cursor_delta,
+        };
+        self.scene.update(&self.camera, &mouse_state);
     }
 
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
@@ -134,10 +142,12 @@ impl ApplicationHandler for App {
     ) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
+                self.cursor_delta = vec2(delta.1 as f32, delta.0 as f32);
+
                 if self.is_right_button_pressed {
                     let scale = 0.2;
-                    let ry = scale * (delta.0 as f32) / 180.0 * PI;
-                    let rx = scale * (delta.1 as f32) / 180.0 * PI;
+                    let rx = scale * self.cursor_delta.x / 180.0 * PI;
+                    let ry = scale * self.cursor_delta.y / 180.0 * PI;
 
                     self.camera.rotate_world_y(-ry);
                     self.camera.rotate_local_x(-rx);

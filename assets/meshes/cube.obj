@@ -1,0 +1,35 @@
+#    y
+#    |
+#    |____ x
+#   /
+# z
+
+v -1.0  1.0 1.0 # 1 front upper left
+v -1.0 -1.0 1.0 # 2 front lower left
+v  1.0 -1.0 1.0 # 3 front lower right
+v  1.0  1.0 1.0 # 4 front upper right
+
+# viewed in -z direction
+v -1.0  1.0 -1.0 # 5 back upper left 
+v  1.0  1.0 -1.0 # 6 back upper right
+v  1.0 -1.0 -1.0 # 7 back lower right
+v -1.0 -1.0 -1.0 # 8 back lower left
+
+# front side
+f 1 2 4
+f 2 3 4
+# back side
+f 6 7 5
+f 5 7 8
+# left side
+f 5 8 1  
+f 1 8 2
+# right side
+f 4 3 6
+f 6 3 7
+# top side
+f 5 1 6
+f 6 1 4
+# bottom side
+f 2 8 3
+f 3 8 7
