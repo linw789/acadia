@@ -9,7 +9,7 @@ use acadia::{
     app::App,
     buffer::Buffer,
     camera::{Camera, CameraBuilder},
-    common::{Vertex, Vertex2D, size_of_var},
+    common::{Vertex, Vertex2D},
     light::DirectionalLight,
     mesh::Mesh,
     offset_of,
@@ -173,7 +173,7 @@ impl ShadowPass {
             .image_pool
             .get_at_index(self.shadow_depth_image_handle);
 
-        let depth_image_layout_barriers = [vk::ImageMemoryBarrier2::default()
+        let shadow_depth_image_layout_barriers = [vk::ImageMemoryBarrier2::default()
             .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
             .src_access_mask(vk::AccessFlags2::NONE)
             .dst_stage_mask(
@@ -193,8 +193,8 @@ impl ShadowPass {
                 base_array_layer: 0,
                 layer_count: 1,
             })];
-        let pre_rendering_dependencies =
-            vk::DependencyInfo::default().image_memory_barriers(&depth_image_layout_barriers);
+        let pre_rendering_dependencies = vk::DependencyInfo::default()
+            .image_memory_barriers(&shadow_depth_image_layout_barriers);
 
         let depth_attachment_info = vk::RenderingAttachmentInfo::default()
             .image_view(shadow_depth_image.view)

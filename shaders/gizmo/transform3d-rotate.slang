@@ -1,5 +1,5 @@
 struct PerFrame {
-    float4x4 pers_view_matrix;
+    float4x4 pers_view_model_matrix;
 }
 
 [[vk::binding(0, 0)]]
@@ -22,7 +22,7 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput vertex_main(VertexInput input) {
     VertexOutput output;
-    output.position = mul(per_frame.pers_view_matrix, float4(input.position, 1.0));
+    output.position = mul(per_frame.pers_view_model_matrix, float4(input.position, 1.0));
     output.frag_input.color = input.color;
     return output;
 }

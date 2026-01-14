@@ -176,6 +176,10 @@ impl Renderer {
         }
     }
 
+    pub fn frame_count(&self) -> u64 {
+        self.frame_count
+    }
+
     pub fn depth_image_view(&self) -> vk::ImageView {
         self.image_pool.get_at_index(self.depth_image_index).view
     }
@@ -185,8 +189,7 @@ impl Renderer {
     }
 
     pub fn obj_id_image_view(&self) -> vk::ImageView {
-        let image_index =
-            self.obj_id_image_indices[self.in_flight_frame_index];
+        let image_index = self.obj_id_image_indices[self.in_flight_frame_index];
         self.image_pool.get_at_index(image_index).view
     }
 
@@ -203,8 +206,7 @@ impl Renderer {
     }
 
     pub fn copy_obj_ids_from_image_to_buffer(&self) {
-        let obj_id_image_index =
-            self.obj_id_image_indices[self.in_flight_frame_index];
+        let obj_id_image_index = self.obj_id_image_indices[self.in_flight_frame_index];
         let obj_id_image = self.image_pool.get_at_index(obj_id_image_index);
 
         let pre_transfer_layout_barrier = [vk::ImageMemoryBarrier2::default()
@@ -324,8 +326,7 @@ impl Renderer {
 
         // Transition the object-id image's layout.
         unsafe {
-            let image_index =
-                self.obj_id_image_indices[self.in_flight_frame_index];
+            let image_index = self.obj_id_image_indices[self.in_flight_frame_index];
             let obj_id_image = self.image_pool.get_at_index(image_index);
 
             let old_layout = if self.frame_count < (MAX_FRAMES_IN_FLIGHT as u64) {

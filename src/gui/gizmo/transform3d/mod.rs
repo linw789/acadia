@@ -13,6 +13,10 @@ pub struct GizmoTransform3D {
     rotate: GizmoRotate,
 }
 
+pub enum GizmoTransform3DPicked {
+    Translate(Vec3),
+}
+
 impl GizmoTransform3D {
     pub fn new(renderer: &Renderer) -> Self {
         Self {
@@ -24,13 +28,13 @@ impl GizmoTransform3D {
     pub fn update(
         &mut self,
         in_flight_frame_index: usize,
-        pers_view_matrix: &Mat4,
+        pers_view_model_matrix: &Mat4,
         camera_pos: Vec3,
     ) {
         self.translate
-            .update(in_flight_frame_index, pers_view_matrix);
+            .update(in_flight_frame_index, &pers_view_model_matrix);
         self.rotate
-            .update(in_flight_frame_index, pers_view_matrix, camera_pos);
+            .update(in_flight_frame_index, &pers_view_model_matrix, camera_pos);
     }
 
     pub fn draw(&self, renderer: &Renderer) {
@@ -41,5 +45,9 @@ impl GizmoTransform3D {
     pub fn destruct(&mut self, device: &Device) {
         self.translate.destruct(device);
         self.rotate.destruct(device);
+    }
+
+    pub fn picked(&self, id: u32) -> Option<Vec3> {
+        self.translate.picked(id)
     }
 }

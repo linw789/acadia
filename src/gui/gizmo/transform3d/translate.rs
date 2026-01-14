@@ -211,11 +211,11 @@ impl GizmoTranslate {
         }
     }
 
-    pub fn update(&mut self, in_flight_frame_index: usize, pers_view_matrix: &Mat4) {
+    pub fn update(&mut self, in_flight_frame_index: usize, pers_view_model_matrix: &Mat4) {
         let per_frame_uniform_data_offset =
             in_flight_frame_index * Self::PER_FRAME_UNIFORM_DATA_SIZE;
         self.uniform_buffer
-            .copy_value(per_frame_uniform_data_offset, pers_view_matrix);
+            .copy_value(per_frame_uniform_data_offset, pers_view_model_matrix);
 
         let scale = 0.5;
         let position = vec3(0.0, 0.0, 0.0);

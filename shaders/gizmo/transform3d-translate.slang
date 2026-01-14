@@ -1,5 +1,5 @@
 struct PerFrame {
-    float4x4 pers_view_matrix;
+    float4x4 pers_view_model_matrix;
 }
 
 [[vk::binding(0, 0)]]
@@ -30,7 +30,7 @@ VertexOutput vertex_main(VertexInput input) {
     output.frag_input.color = input.color;
 
     float4 world_pos = mul(input.transform, float4(input.position, 1.0));
-    output.position = mul(per_frame.pers_view_matrix, world_pos);
+    output.position = mul(per_frame.pers_view_model_matrix, world_pos);
     return output;
 }
 

@@ -18,7 +18,7 @@ use acadia::{
     scene::Scene,
     shader::Program,
 };
-use glam::{Mat4, Vec3, vec3};
+use glam::{Mat4, Vec3, vec3, Vec4, vec2, Vec2};
 use std::rc::Rc;
 
 #[derive(Default)]
@@ -28,6 +28,7 @@ struct CubePass {
     pipeline: vk::Pipeline,
     desc_sets: Vec<vk::DescriptorSet>,
     uniform_buf: Buffer,
+    translate: Vec3,
 }
 
 #[derive(Default)]
@@ -35,8 +36,8 @@ struct GizmoTest {
     renderer: Option<Renderer>,
     cube_pass: CubePass,
     gizmo_transform3d: GizmoTransform3D,
-    is_right_button_pressed: bool,
-    gizmo_translate_picked: Option<Vec3>,
+    is_left_button_pressed: bool,
+    translation_gizmo: Option<Vec3>,
 }
 
 impl CubePass {
@@ -147,6 +148,7 @@ impl CubePass {
             pipeline,
             desc_sets,
             uniform_buf,
+            translate: Vec3::ZERO,
         }
     }
 
@@ -294,23 +296,26 @@ impl Scene for GizmoTest {
     fn update(&mut self, camera: &Camera, mouse_state: &MouseState) {
         let renderer = self.renderer.as_mut().unwrap();
 
-        let distance_to_camera = camera.position.length();
-        let dist_scale = distance_to_camera / 15.0;
-        let scale_matrix = Mat4::from_scale(vec3(dist_scale, dist_scale, dist_scale));
-
         let image_extent = renderer.vkbase.swapchain.image_extent();
         let image_aspect_ratio = (image_extent.width as f32) / (image_extent.height as f32);
         let pv_matrix = camera.ny_pers_view_matrix(image_aspect_ratio);
-        let pvsm = pv_matrix * scale_matrix;
+
+        let transform3d_gizmo_matrix = {
+            let distance_to_camera = camera.position.length();
+            let dist_scale = distance_to_camera / 15.0;
+            let scale_matrix = Mat4::from_scale(vec3(dist_scale, dist_scale, dist_scale));
+            let translation_matrix = Mat4::from_translation(self.cube_pass.translate);
+            pv_matrix * translation_matrix * scale_matrix
+        };
         
-        let cube_transform = Mat4::from_translation(vec3(1.0, 0.0, 0.0));
         self.cube_pass
             .update(renderer.in_flight_frame_index(), &pv_matrix);
         self.gizmo_transform3d
-            .update(renderer.in_flight_frame_index(), &pvsm, camera.position);
+            .update(renderer.in_flight_frame_index(), &transform3d_gizmo_matrix, camera.position);
 
         renderer.begin_frame();
 
+        let cube_transform = Mat4::from_translation(self.cube_pass.translate);
         self.cube_pass.draw(&renderer, &cube_transform);
         self.gizmo_transform3d.draw(renderer);
 
@@ -318,18 +323,28 @@ impl Scene for GizmoTest {
 
         renderer.end_frame();
 
-        if self.is_right_button_pressed == false && mouse_state.right_button_pressed == true {
+        if self.is_left_button_pressed == false && mouse_state.left_button_pressed == true {
             let obj_id_index = ((mouse_state.cursor_position.y as u32) * image_extent.width)
                 + (mouse_state.cursor_position.x as u32);
             let obj_id_buf = renderer.obj_id_buffer();
             let obj_id = obj_id_buf.get::<u32>(obj_id_index as usize);
 
-            self.is_right_button_pressed = true;
-            self.gizmo_translate_picked = self.gizmo_transform3d.picked(obj_id);
-        } else if self.is_right_button_pressed == true && mouse_state.right_button_pressed == false
+            self.is_left_button_pressed = true;
+            self.translation_gizmo = self.gizmo_transform3d.picked(obj_id);
+        } else if self.is_left_button_pressed == true && mouse_state.left_button_pressed == false
         {
-            self.is_right_button_pressed = false;
-            self.gizmo_translate_picked = None;
+            self.is_left_button_pressed = false;
+            self.translation_gizmo = None;
+        } 
+
+        if let Some(translater) = self.translation_gizmo && mouse_state.cursor_delta != Vec2::ZERO {
+            let translater_world = camera.view_matrix() * Vec4::from((translater, 1.0));
+            let translater_camera = translater_world.normalize();
+            let translater_2d = vec2(translater_camera.x, translater_camera.y);
+            let mouse_delta = vec2(mouse_state.cursor_delta.x, -mouse_state.cursor_delta.y) * 0.1;
+            println!("[DEBUG LINW] frame count: {}, translater picked: {}, delta: {}", renderer.frame_count(), translater, mouse_delta);
+            let delta = Vec2::dot(translater_2d, mouse_delta);
+            self.cube_pass.translate += translater * delta;
         }
     }
 

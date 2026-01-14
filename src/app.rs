@@ -18,6 +18,7 @@ pub struct App {
     camera: Camera,
 
     exit_requested: bool,
+    is_left_button_pressed: bool,
     is_right_button_pressed: bool,
     cursor_pos: Vec2,
     cursor_delta: Vec2,
@@ -31,6 +32,7 @@ impl App {
             scene,
             camera,
             exit_requested: false,
+            is_left_button_pressed: false,
             is_right_button_pressed: false,
             cursor_pos: Vec2::ZERO,
             cursor_delta: Vec2::ZERO,
@@ -44,11 +46,12 @@ impl App {
     fn update(&mut self) {
         let mouse_state = MouseState {
             right_button_pressed: self.is_right_button_pressed,
-            left_button_pressed: false,
+            left_button_pressed: self.is_left_button_pressed,
             cursor_position: self.cursor_pos,
             cursor_delta: self.cursor_delta,
         };
         self.scene.update(&self.camera, &mouse_state);
+        self.cursor_delta = Vec2::ZERO;
     }
 
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
@@ -107,6 +110,12 @@ impl ApplicationHandler for App {
                         ElementState::Released => self.is_right_button_pressed = false,
                     }
                 }
+                if button == MouseButton::Left {
+                    match state {
+                        ElementState::Pressed => self.is_left_button_pressed = true,
+                        ElementState::Released => self.is_left_button_pressed = false,
+                    }
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = vec2(position.x as f32, position.y as f32);
@@ -142,15 +151,15 @@ impl ApplicationHandler for App {
     ) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
-                self.cursor_delta = vec2(delta.1 as f32, delta.0 as f32);
+                self.cursor_delta = vec2(delta.0 as f32, delta.1 as f32);
 
                 if self.is_right_button_pressed {
                     let scale = 0.2;
                     let rx = scale * self.cursor_delta.x / 180.0 * PI;
                     let ry = scale * self.cursor_delta.y / 180.0 * PI;
 
-                    self.camera.rotate_world_y(-ry);
-                    self.camera.rotate_local_x(-rx);
+                    self.camera.rotate_world_y(-rx);
+                    self.camera.rotate_local_x(-ry);
                 }
             }
             _ => (),
