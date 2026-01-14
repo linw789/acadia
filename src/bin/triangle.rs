@@ -10,6 +10,7 @@ use acadia::{
     camera::{Camera, CameraBuilder},
     common::{Vertex, size_of_var},
     mesh::Mesh,
+    input::MouseState,
     offset_of,
     pipeline::PipelineBuilder,
     renderer::{MAX_FRAMES_IN_FLIGHT, Renderer},
@@ -154,6 +155,7 @@ impl Scene for Triangle {
                 Rc::clone(renderer.shader_set.get("triangle.vert").unwrap()),
                 Rc::clone(renderer.shader_set.get("triangle.frag").unwrap()),
             ],
+            0,
         );
         self.mesh = Mesh::from_obj(
             &renderer.vkbase.device,
@@ -247,7 +249,7 @@ impl Scene for Triangle {
         self.renderer = Some(renderer);
     }
 
-    fn update(&mut self, camera: &Camera) {
+    fn update(&mut self, camera: &Camera, _: &MouseState) {
         let renderer = self.renderer.as_ref().unwrap();
 
         let image_extent = renderer.vkbase.swapchain.image_extent();
