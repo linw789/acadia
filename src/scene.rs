@@ -1,6 +1,6 @@
 use crate::{camera::Camera, input::MouseState};
-use ::winit::{dpi::PhysicalSize, window::Window};
 use ::glam::Vec2;
+use ::winit::{dpi::PhysicalSize, window::Window};
 
 pub trait Scene {
     fn init(&mut self, window: &Window);

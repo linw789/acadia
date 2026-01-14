@@ -9,8 +9,8 @@ use acadia::{
     buffer::Buffer,
     camera::{Camera, CameraBuilder},
     common::{Vertex, size_of_var},
-    mesh::Mesh,
     input::MouseState,
+    mesh::Mesh,
     offset_of,
     pipeline::PipelineBuilder,
     renderer::{MAX_FRAMES_IN_FLIGHT, Renderer},
@@ -145,6 +145,7 @@ impl Triangle {
         renderer.end_frame();
     }
 }
+
 impl Scene for Triangle {
     fn init(&mut self, window: &Window) {
         let renderer = Renderer::new(window);

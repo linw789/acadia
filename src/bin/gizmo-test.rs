@@ -18,7 +18,7 @@ use acadia::{
     scene::Scene,
     shader::Program,
 };
-use glam::{Mat4, Vec3, vec3, Vec4, vec2, Vec2};
+use glam::{Mat4, Vec2, Vec3, Vec4, vec2, vec3};
 use std::rc::Rc;
 
 #[derive(Default)]
@@ -307,11 +307,14 @@ impl Scene for GizmoTest {
             let translation_matrix = Mat4::from_translation(self.cube_pass.translate);
             pv_matrix * translation_matrix * scale_matrix
         };
-        
+
         self.cube_pass
             .update(renderer.in_flight_frame_index(), &pv_matrix);
-        self.gizmo_transform3d
-            .update(renderer.in_flight_frame_index(), &transform3d_gizmo_matrix, camera.position);
+        self.gizmo_transform3d.update(
+            renderer.in_flight_frame_index(),
+            &transform3d_gizmo_matrix,
+            camera.position,
+        );
 
         renderer.begin_frame();
 
@@ -331,18 +334,24 @@ impl Scene for GizmoTest {
 
             self.is_left_button_pressed = true;
             self.translation_gizmo = self.gizmo_transform3d.picked(obj_id);
-        } else if self.is_left_button_pressed == true && mouse_state.left_button_pressed == false
-        {
+        } else if self.is_left_button_pressed == true && mouse_state.left_button_pressed == false {
             self.is_left_button_pressed = false;
             self.translation_gizmo = None;
-        } 
+        }
 
-        if let Some(translater) = self.translation_gizmo && mouse_state.cursor_delta != Vec2::ZERO {
+        if let Some(translater) = self.translation_gizmo
+            && mouse_state.cursor_delta != Vec2::ZERO
+        {
             let translater_world = camera.view_matrix() * Vec4::from((translater, 1.0));
             let translater_camera = translater_world.normalize();
             let translater_2d = vec2(translater_camera.x, translater_camera.y);
             let mouse_delta = vec2(mouse_state.cursor_delta.x, -mouse_state.cursor_delta.y) * 0.1;
-            println!("[DEBUG LINW] frame count: {}, translater picked: {}, delta: {}", renderer.frame_count(), translater, mouse_delta);
+            println!(
+                "[DEBUG LINW] frame count: {}, translater picked: {}, delta: {}",
+                renderer.frame_count(),
+                translater,
+                mouse_delta
+            );
             let delta = Vec2::dot(translater_2d, mouse_delta);
             self.cube_pass.translate += translater * delta;
         }

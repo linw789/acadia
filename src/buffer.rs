@@ -153,7 +153,7 @@ impl Buffer {
 
     pub fn get<T: Copy>(&self, index: usize) -> T {
         let ptr = self.ptr.borrow();
-        assert!(ptr.size % (size_of::<T>() as u64) == 0); 
+        assert!(ptr.size % (size_of::<T>() as u64) == 0);
         let t_ptr = ptr.ptr as *const T;
         unsafe { *t_ptr.add(index) }
     }

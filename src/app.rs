@@ -1,4 +1,4 @@
-use crate::{camera::Camera, scene::Scene, input::MouseState};
+use crate::{camera::Camera, input::MouseState, scene::Scene};
 use ::winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,

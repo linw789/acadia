@@ -101,10 +101,7 @@ impl ImagePool {
         })
     }
 
-    pub fn new_image(
-        &mut self,
-        createparam: &ImageCreateParam,
-    ) -> u32 {
+    pub fn new_image(&mut self, createparam: &ImageCreateParam) -> u32 {
         self.add_image(Image::new(
             &self.device,
             &self.device_memory_properties,
@@ -140,11 +137,7 @@ impl ImagePool {
                     components: view_components,
                     ..Default::default()
                 };
-                Image::new(
-                    &self.device,
-                    &self.device_memory_properties,
-                    &createparam,
-                )
+                Image::new(&self.device, &self.device_memory_properties, &createparam)
             })
             .collect();
 
@@ -437,7 +430,11 @@ impl Image {
 impl Default for ImageCreateParam {
     fn default() -> Self {
         Self {
-            extent: vk::Extent3D { width: 0, height: 0, depth: 0 },
+            extent: vk::Extent3D {
+                width: 0,
+                height: 0,
+                depth: 0,
+            },
             format: vk::Format::R32G32B32A32_SFLOAT,
             components: vk::ComponentMapping {
                 r: vk::ComponentSwizzle::IDENTITY,
