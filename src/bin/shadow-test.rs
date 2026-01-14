@@ -10,6 +10,7 @@ use acadia::{
     buffer::Buffer,
     camera::{Camera, CameraBuilder},
     common::{Vertex, Vertex2D},
+    input::MouseState,
     light::DirectionalLight,
     mesh::Mesh,
     offset_of,
@@ -78,6 +79,7 @@ impl ShadowPass {
                     .get("shadow-test/shadow-pass.vert")
                     .unwrap(),
             )],
+            0,
         );
 
         let pipeline = {
@@ -329,6 +331,7 @@ impl LightPass {
                         .unwrap(),
                 ),
             ],
+            0,
         );
 
         let pipeline = {
@@ -622,6 +625,7 @@ impl ShadowViewPass {
                         .unwrap(),
                 ),
             ],
+            0,
         );
 
         let pipeline = {
@@ -923,7 +927,7 @@ impl Scene for ShadowTest {
         self.renderer = Some(renderer);
     }
 
-    fn update(&mut self, camera: &Camera) {
+    fn update(&mut self, camera: &Camera, _: &MouseState) {
         let renderer = self.renderer.as_mut().unwrap();
 
         let image_extent = renderer.vkbase.swapchain.image_extent();
