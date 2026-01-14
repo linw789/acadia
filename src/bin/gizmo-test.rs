@@ -322,8 +322,6 @@ impl Scene for GizmoTest {
         self.cube_pass.draw(&renderer, &cube_transform);
         self.gizmo_transform3d.draw(renderer);
 
-        renderer.copy_obj_ids_from_image_to_buffer();
-
         renderer.end_frame();
 
         if self.is_left_button_pressed == false && mouse_state.left_button_pressed == true {

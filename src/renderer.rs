@@ -394,6 +394,8 @@ impl Renderer {
     }
 
     pub fn end_frame(&mut self) {
+        self.copy_obj_ids_from_image_to_buffer();
+
         let frame_fence = self.frame_fences[self.in_flight_frame_index];
         let present_acquired_semaphore =
             self.present_acquired_semaphores[self.in_flight_frame_index];
